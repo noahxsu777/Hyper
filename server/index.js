@@ -19,6 +19,16 @@ const config = {
   offlineTimeout: process.env.HB_OFFLINE_TIMEOUT ? Number(process.env.HB_OFFLINE_TIMEOUT) : undefined,
 }
 
+// Fly (and most hosts) set an app name in the environment. Telling someone on
+// a deployed server to "copy .env.example to .env" is useless advice: there is
+// no shell to copy it in, and the fix is a secret instead.
+const HOSTED = Boolean(process.env.FLY_APP_NAME || process.env.RAILWAY_PROJECT_ID || process.env.RENDER)
+const KEY_HINT = process.env.FLY_APP_NAME
+  ? "Defínela en Fly con: fly secrets set HYPERBEAM_API_KEY=sk_test_…"
+  : HOSTED
+    ? "Defínela como variable de entorno del servicio."
+    : "Copia .env.example a .env y pon tu clave dentro."
+
 /** @type {HyperbeamClient|null} */
 let hyperbeam = null
 /** @type {string|null} */
@@ -26,7 +36,7 @@ let configError = null
 try {
   hyperbeam = new HyperbeamClient(config)
 } catch (err) {
-  configError = err.message
+  configError = `${err.message} ${KEY_HINT}`
 }
 
 /**

@@ -29,10 +29,9 @@ export class HyperbeamClient {
   constructor(config = {}) {
     const apiKey = config.apiKey || ""
     if (!apiKey) {
-      throw new HyperbeamError(
-        "Missing HYPERBEAM_API_KEY. Copy .env.example to .env and set your key.",
-        { status: 500 },
-      )
+      // How to fix this depends on where the server is running, so the caller
+      // appends the instruction that actually applies.
+      throw new HyperbeamError("Falta la clave HYPERBEAM_API_KEY.", { status: 500 })
     }
     this.apiKey = apiKey
     this.apiUrl = (config.apiUrl || DEFAULTS.apiUrl).replace(/\/+$/, "")

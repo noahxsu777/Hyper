@@ -219,11 +219,11 @@ function showIdle(note) {
       html: `${icon("power", { size: 21 })}<span>Abrir el navegador compartido</span>`,
       onClick: () => start(),
     }),
+    // `text`, not `html`: the message can carry an upstream API response, and
+    // that is not ours to trust as markup.
     !configured
       ? h("p.overlay__note", {
-          html:
-            room.config?.error ??
-            "Falta la clave: copia <code>.env.example</code> a <code>.env</code> y define <code>HYPERBEAM_API_KEY</code>.",
+          text: room.config?.error ?? "Falta la clave HYPERBEAM_API_KEY en el servidor.",
         })
       : null,
     configured ? servicesGrid() : null,
