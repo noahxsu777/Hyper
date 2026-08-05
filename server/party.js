@@ -12,6 +12,34 @@ const HISTORY_LIMIT = 120
 const NAME_LIMIT = 24
 const TEXT_LIMIT = 800
 
+/**
+ * The stickers the room can send. Kept here rather than on the client so the
+ * server is the one deciding what may end up in everyone's chat: a client can
+ * only ask for an id from this list.
+ */
+export const STICKERS = [
+  { id: "popcorn", char: "🍿" },
+  { id: "lol", char: "😂" },
+  { id: "heart", char: "❤️" },
+  { id: "fire", char: "🔥" },
+  { id: "clap", char: "👏" },
+  { id: "shock", char: "😱" },
+  { id: "cry", char: "😭" },
+  { id: "eyes", char: "👀" },
+  { id: "sleep", char: "😴" },
+  { id: "thumbs", char: "👍" },
+  { id: "boo", char: "👎" },
+  { id: "skull", char: "💀" },
+  { id: "party", char: "🎉" },
+  { id: "cool", char: "😎" },
+  { id: "think", char: "🤔" },
+  { id: "star", char: "⭐" },
+  { id: "hush", char: "🤫" },
+  { id: "rewind", char: "⏪" },
+]
+
+const STICKER_BY_ID = new Map(STICKERS.map((sticker) => [sticker.id, sticker]))
+
 /** @typedef {{ id: string, name: string, joinedAt: number }} Viewer */
 
 export function createParty(server, { path = "/ws", getSession } = {}) {
@@ -22,6 +50,13 @@ export function createParty(server, { path = "/ws", getSession } = {}) {
   /** @type {Array<{id: string, name: string, text: string, at: number, kind: string}>} */
   const history = []
   let nextId = 1
+
+  /**
+   * The film's own volume, which belongs to the room rather than to any one
+   * viewer: whoever changes it changes it for everybody, so the server holds
+   * the value and hands it to people who arrive later.
+   */
+  const audio = { volume: 100, muted: false }
 
   const clean = (value, limit) =>
     String(value ?? "")
@@ -82,6 +117,8 @@ export function createParty(server, { path = "/ws", getSession } = {}) {
           you: { id: viewer.id, name: viewer.name },
           viewers: roster(),
           history,
+          stickers: STICKERS,
+          audio,
           session: getSession?.() ?? null,
         })
         announcePresence()
@@ -106,6 +143,36 @@ export function createParty(server, { path = "/ws", getSession } = {}) {
         history.push(entry)
         if (history.length > HISTORY_LIMIT) history.shift()
         broadcast({ type: "chat", message: entry })
+        return
+      }
+
+      if (payload.type === "sticker") {
+        const sticker = STICKER_BY_ID.get(String(payload.id))
+        if (!sticker) return
+        const entry = {
+          id: `m${nextId++}`,
+          name: viewer.name,
+          viewerId: viewer.id,
+          sticker: sticker.id,
+          char: sticker.char,
+          at: Date.now(),
+          kind: "sticker",
+        }
+        history.push(entry)
+        if (history.length > HISTORY_LIMIT) history.shift()
+        broadcast({ type: "chat", message: entry })
+        return
+      }
+
+      if (payload.type === "audio") {
+        // Only the viewer who moved the control drives the remote player; the
+        // rest just follow, otherwise every client would send its own key
+        // presses and the volume would move several times over.
+        if (typeof payload.volume === "number") {
+          audio.volume = Math.round(Math.min(100, Math.max(0, payload.volume)))
+        }
+        if (typeof payload.muted === "boolean") audio.muted = payload.muted
+        broadcast({ type: "audio", audio, by: viewer.id })
         return
       }
 

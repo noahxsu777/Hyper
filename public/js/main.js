@@ -35,6 +35,7 @@ const SERVICES = [
 const els = {
   app: $("#app"),
   topbar: $("#topbar"),
+  stage: $("#stage"),
   screen: $("#screen"),
   mount: $("#screenMount"),
   badge: $("#screenBadge"),
@@ -56,6 +57,10 @@ const room = {
   hb: null,
   starting: false,
   currentUrl: "",
+  /** Stickers the server allows, delivered on join. */
+  stickers: [],
+  /** The film's own volume, shared by the whole room. */
+  audio: { volume: 100, muted: false },
 }
 
 /* --------------------------------------------------------------------------
@@ -272,19 +277,149 @@ function tapKey(key) {
   room.hb.sendEvent({ type: "keyup", key })
 }
 
-function renderControls() {
-  const volumeSlider = h("input", {
-    type: "range",
-    min: "0",
-    max: "100",
-    value: String(Math.round(state.volume * 100)),
-    "aria-label": "Volumen",
-    onInput: (event) => {
-      set({ volume: Number(event.target.value) / 100, muted: false })
-      applyVolume()
-      renderControls()
-    },
+/* --------------------------------------------------------------------------
+   Volume: yours alone, and the room's
+   -------------------------------------------------------------------------- */
+
+const volumePopover = h("div.popover.popover--volume", { hidden: true })
+
+/**
+ * Push the room's volume towards `target`.
+ *
+ * There is no API for the volume inside the virtual browser, so this nudges the
+ * player with the arrow keys, which move in 5% steps on YouTube, Twitch and
+ * Vimeo. Only the viewer who moved the control sends the keys — everyone else
+ * just updates their slider, or the volume would move once per person.
+ */
+function driveRoomVolume(target) {
+  const steps = Math.round((target - room.audio.volume) / 5)
+  const key = steps > 0 ? "ArrowUp" : "ArrowDown"
+  for (let i = 0; i < Math.abs(steps); i++) tapKey(key)
+}
+
+/** Muting the tab is exact: Chromium's own tabs API does it for the whole room. */
+function driveRoomMute(muted) {
+  room.hb?.tabs.update({ muted }).catch((error) => {
+    console.warn("[party] no se pudo silenciar la pestaña", error)
+    toast({
+      title: "No se pudo silenciar",
+      text: "El navegador compartido no aceptó la orden.",
+      color: "var(--orange)",
+    })
   })
+}
+
+function renderVolumePopover() {
+  const line = ({ label, note, value, muted, disabled, onValue, onMute }) => {
+    const readout = h("span.vol__value", { text: muted ? "—" : `${Math.round(value)}%` })
+    return h(
+      "div.vol__row",
+      null,
+      h("div.vol__label", { text: label }),
+      h(
+        "div.vol__line",
+        null,
+        h("button.vol__mute", {
+          type: "button",
+          "aria-label": muted ? "Activar sonido" : "Silenciar",
+          dataset: { on: String(muted) },
+          disabled,
+          html: icon(muted ? "speaker-off" : "speaker", { size: 17 }),
+          onClick: () => onMute(!muted),
+        }),
+        h("input", {
+          type: "range",
+          min: "0",
+          max: "100",
+          value: String(Math.round(value)),
+          "aria-label": label,
+          disabled,
+          onInput: (event) => {
+            const next = Number(event.target.value)
+            readout.textContent = `${next}%`
+            onValue(next)
+          },
+        }),
+        readout,
+      ),
+      note ? h("p.vol__note", { text: note }) : null,
+    )
+  }
+
+  fill(
+    volumePopover,
+    h(
+      "div.popover__head",
+      null,
+      h("span", { text: "Volumen" }),
+      h("button.popover__close", {
+        type: "button",
+        "aria-label": "Cerrar",
+        html: icon("x", { size: 15 }),
+        onClick: closeVolume,
+      }),
+    ),
+    line({
+      label: "Solo para ti",
+      note: "Nadie más lo nota.",
+      value: state.volume * 100,
+      muted: state.muted,
+      onValue: (next) => {
+        set({ volume: next / 100, muted: false })
+        applyVolume()
+        renderControls()
+      },
+      onMute: (next) => {
+        set({ muted: next })
+        applyVolume()
+        renderVolumePopover()
+        renderControls()
+      },
+    }),
+    line({
+      label: "Para toda la sala",
+      note: room.hb
+        ? "Cambia el volumen de la película para todos. Funciona en YouTube, Twitch y Vimeo."
+        : "Disponible cuando el navegador compartido esté abierto.",
+      value: room.audio.volume,
+      muted: room.audio.muted,
+      disabled: !room.hb,
+      onValue: (next) => {
+        driveRoomVolume(next)
+        room.audio.volume = next
+        room.socket?.audio({ volume: next })
+      },
+      onMute: (next) => {
+        driveRoomMute(next)
+        room.audio.muted = next
+        room.socket?.audio({ muted: next })
+        renderVolumePopover()
+        renderControls()
+      },
+    }),
+  )
+}
+
+function openVolume() {
+  renderVolumePopover()
+  volumePopover.hidden = false
+  renderControls()
+}
+
+function closeVolume() {
+  volumePopover.hidden = true
+  renderControls()
+}
+
+function toggleVolume() {
+  if (volumePopover.hidden) openVolume()
+  else closeVolume()
+}
+
+function renderControls() {
+  // Anything that talks to the shared browser is dead until one is attached;
+  // the bar itself stays put so the volume is reachable from the first second.
+  const live = Boolean(room.hb)
 
   const ctrl = (glyph, label, onClick, options = {}) =>
     h("button.ctrl", {
@@ -292,11 +427,14 @@ function renderControls() {
       "aria-label": label,
       title: options.title ?? label,
       dataset: options.dataset ?? {},
+      disabled: options.needsBrowser !== false && !live,
       html: options.text
         ? `${icon(glyph, { size: 19 })}<span>${options.text}</span>`
         : icon(glyph, { size: 19 }),
       onClick,
     })
+
+  addressInput.disabled = !live
 
   fill(
     els.controls,
@@ -317,30 +455,27 @@ function renderControls() {
       addressInput,
     ),
     h(
-      "div.volume",
-      null,
-      h("button.ctrl", {
-        type: "button",
-        "aria-label": state.muted ? "Activar sonido" : "Silenciar",
-        html: icon(state.muted ? "speaker-off" : "speaker", { size: 19 }),
-        onClick: () => {
-          set({ muted: !state.muted })
-          applyVolume()
-          renderControls()
-        },
-      }),
-      volumeSlider,
-    ),
-    h(
       "div.controls__group",
       null,
       ctrl("reload", "Recargar", () => room.hb?.tabs.reload()),
+      ctrl(
+        state.muted || room.audio.muted ? "speaker-off" : "speaker",
+        "Volumen",
+        toggleVolume,
+        {
+          dataset: { on: String(!volumePopover.hidden) },
+          title: "Volumen — el tuyo y el de la sala",
+          needsBrowser: false,
+        },
+      ),
       ctrl("screen", "Modo cine", toggleTheatre, {
         dataset: { on: String(els.app.dataset.theatre === "true") },
         title: "Modo cine — oculta el chat",
+        needsBrowser: false,
       }),
       ctrl("expand", "Pantalla completa", toggleFullscreen, {
         title: "Pantalla completa de la ventana",
+        needsBrowser: false,
       }),
     ),
   )
@@ -378,12 +513,74 @@ const composerField = h("textarea", {
   "aria-label": "Mensaje",
 })
 
-const composerSend = h("button", {
+const composerSend = h("button.composer__send", {
   type: "button",
   disabled: true,
   "aria-label": "Enviar",
   html: icon("send", { size: 17, stroke: 1.9 }),
 })
+
+/* ---- stickers ------------------------------------------------------------ */
+
+const stickerPicker = h("div.popover.popover--stickers", { hidden: true })
+
+const stickerButton = h("button.composer__sticker", {
+  type: "button",
+  "aria-label": "Stickers",
+  text: "🙂",
+  onClick: () => toggleStickers(),
+})
+
+function renderStickerPicker() {
+  fill(
+    stickerPicker,
+    h(
+      "div.popover__head",
+      null,
+      h("span", { text: "Stickers" }),
+      h("button.popover__close", {
+        type: "button",
+        "aria-label": "Cerrar",
+        html: icon("x", { size: 15 }),
+        onClick: closeStickers,
+      }),
+    ),
+    room.stickers.length
+      ? h(
+          "div.sticker-grid",
+          null,
+          ...room.stickers.map((sticker) =>
+            h("button", {
+              type: "button",
+              text: sticker.char,
+              title: sticker.id,
+              "aria-label": `Enviar sticker ${sticker.id}`,
+              onClick: () => {
+                room.socket?.sticker(sticker.id)
+                closeStickers()
+              },
+            }),
+          ),
+        )
+      : h("p.vol__note", { text: "Conectando con la sala…" }),
+  )
+}
+
+function openStickers() {
+  renderStickerPicker()
+  stickerPicker.hidden = false
+  stickerButton.dataset.on = "true"
+}
+
+function closeStickers() {
+  stickerPicker.hidden = true
+  delete stickerButton.dataset.on
+}
+
+function toggleStickers() {
+  if (stickerPicker.hidden) openStickers()
+  else closeStickers()
+}
 
 const panelBody = h("div.panel__body")
 
@@ -409,7 +606,14 @@ composerField.addEventListener("keydown", (event) => {
 })
 composerSend.addEventListener("click", sendChat)
 
-const composer = h("div.composer", null, composerField, composerSend)
+const composer = h(
+  "div.composer",
+  null,
+  stickerPicker,
+  stickerButton,
+  composerField,
+  composerSend,
+)
 
 function renderPanel() {
   const segmented = h(
@@ -499,7 +703,9 @@ function renderPanelBody() {
               }),
             }),
           ),
-          h("div.msg__text", { text: message.text }),
+          message.kind === "sticker"
+            ? h("div.msg__sticker", { text: message.char })
+            : h("div.msg__text", { text: message.text }),
         ),
       )
     }),
@@ -563,8 +769,8 @@ async function attach(Hyperbeam, session) {
     delegateKeyboard: true,
     onDisconnect: (event) => {
       room.hb = null
-      els.controls.hidden = true
       renderTopbar()
+      renderControls()
       showIdle(
         event?.type === "inactive"
           ? "La sesión se cerró por inactividad."
@@ -590,10 +796,11 @@ async function attach(Hyperbeam, session) {
 
   room.starting = false
   els.overlay.hidden = true
-  els.controls.hidden = false
   renderTopbar()
   renderControls()
   applyVolume()
+  // The room's volume controls only work with a browser attached.
+  if (!volumePopover.hidden) renderVolumePopover()
   watchTabs()
   fitToScreen()
 }
@@ -684,10 +891,14 @@ async function openSettings() {
       "aria-label": "Tu nombre",
     })
 
+    // A user agent is only meaningful once you can see which one went out, so
+    // it is shown here rather than left to the server logs.
+    const agent = config?.userAgent
     const rows = [
       ["Navegador compartido", session ? "En marcha" : "Detenido"],
       ["Clave de API", config?.configured ? (config.testKey ? "De prueba" : "Activa") : "Sin configurar"],
       ["Resolución", config?.width ? `${config.width}×${config.height}` : "—"],
+      ["User agent", agent ? agent : "Por defecto (Chrome de escritorio)"],
       ["Personas en la sala", String(room.viewers.length)],
     ]
 
@@ -733,9 +944,9 @@ async function openSettings() {
                 /* already gone */
               }
               room.hb = null
-              els.controls.hidden = true
               await api.endSession().catch(() => {})
               renderTopbar()
+              renderControls()
               showIdle()
             },
           })
@@ -806,6 +1017,26 @@ window.addEventListener("resize", () => fitToScreen())
 document.addEventListener("fullscreenchange", () => setTimeout(fitToScreen, 200))
 
 /* --------------------------------------------------------------------------
+   Popovers close when you look away from them
+   -------------------------------------------------------------------------- */
+
+document.addEventListener("pointerdown", (event) => {
+  if (!volumePopover.hidden && !volumePopover.contains(event.target)) {
+    // The button that opened it does its own toggling.
+    if (!event.target.closest?.('.ctrl[aria-label="Volumen"]')) closeVolume()
+  }
+  if (!stickerPicker.hidden && !stickerPicker.contains(event.target)) {
+    if (!event.target.closest?.(".composer__sticker")) closeStickers()
+  }
+})
+
+window.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return
+  if (!volumePopover.hidden) closeVolume()
+  if (!stickerPicker.hidden) closeStickers()
+})
+
+/* --------------------------------------------------------------------------
    Boot
    -------------------------------------------------------------------------- */
 
@@ -817,6 +1048,9 @@ async function boot() {
   }))
 
   els.app.dataset.theatre = String(Boolean(state.theatre))
+  els.stage.append(volumePopover)
+  els.controls.hidden = false
+  renderControls()
   renderTopbar()
   renderPanel()
   showIdle()
@@ -836,10 +1070,20 @@ async function boot() {
           room.you = event.you
           room.viewers = event.viewers
           room.messages = event.history ?? []
+          room.stickers = event.stickers ?? []
+          if (event.audio) room.audio = event.audio
           renderTopbar()
           renderPanel()
           // Someone opened the browser before we arrived: join it.
           if (event.session) join(event.session)
+          break
+
+        case "audio":
+          // Someone else moved the room's volume; follow along without
+          // touching the player, or every client would send its own keys.
+          room.audio = event.audio
+          if (!volumePopover.hidden) renderVolumePopover()
+          renderControls()
           break
 
         case "you":
@@ -868,8 +1112,8 @@ async function boot() {
               /* already gone */
             }
             room.hb = null
-            els.controls.hidden = true
             renderTopbar()
+            renderControls()
             showIdle("Alguien ha cerrado el navegador compartido.")
           }
           break

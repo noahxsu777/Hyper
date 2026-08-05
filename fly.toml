@@ -23,6 +23,10 @@ primary_region = 'ams'
   HB_WIDTH = '1280'
   HB_HEIGHT = '720'
   HB_START_URL = 'https://www.google.com'
+  # User agent del navegador compartido. Hyperbeam solo documenta el preset
+  # 'chrome_android'; una cadena propia se pasa tal cual y decide su API. Si la
+  # rechaza, el servidor reintenta con el agente por defecto en vez de fallar.
+  HB_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15'
   # Segundos sin nadie conectado antes de que Hyperbeam apague la máquina virtual.
   HB_OFFLINE_TIMEOUT = '60'
 

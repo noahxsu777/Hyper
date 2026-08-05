@@ -208,6 +208,7 @@ body {
    =========================================================================== */
 
 .stage {
+  position: relative;
   grid-area: stage;
   display: flex;
   flex-direction: column;
@@ -496,16 +497,131 @@ body {
   color: var(--label-3);
 }
 
-.volume {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: none;
-  width: 128px;
+/* --------------------------------------------------------------------------
+   Popovers: the volume panel and the sticker picker
+   -------------------------------------------------------------------------- */
+
+.popover {
+  position: absolute;
+  z-index: 20;
+  width: min(300px, calc(100vw - 28px));
+  padding: 12px 14px 14px;
+  border-radius: 16px;
+  background: var(--material-thick);
+  backdrop-filter: var(--blur-regular);
+  -webkit-backdrop-filter: var(--blur-regular);
+  border: 0.5px solid var(--separator);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+  animation: pop var(--dur) var(--ease-spring);
 }
 
+.popover[hidden] {
+  display: none;
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+}
+
+/* Sits just above the control bar, aligned to its right edge. */
+.popover--volume {
+  right: 14px;
+  bottom: 68px;
+}
+
+@media (max-width: 900px) {
+  .popover--volume {
+    right: 10px;
+    bottom: 62px;
+  }
+}
+
+.popover__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--label-2);
+  padding-bottom: 10px;
+}
+
+.popover__close {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--label-2);
+  background: var(--fill-3);
+}
+
+.popover__close:hover {
+  color: var(--label);
+}
+
+.vol__row + .vol__row {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 0.5px solid var(--separator);
+}
+
+.vol__label {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.vol__line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.vol__mute {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--label);
+  background: var(--fill-3);
+}
+
+.vol__mute[data-on="true"] {
+  background: var(--red);
+  color: #fff;
+}
+
+.vol__mute[disabled] {
+  opacity: 0.4;
+}
+
+.vol__value {
+  font-size: 12px;
+  color: var(--label-2);
+  width: 38px;
+  text-align: right;
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.vol__note {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--label-3);
+  margin-top: 7px;
+}
+
+.vol__line input[type="range"],
 .volume input[type="range"] {
   flex: 1;
+  min-width: 0;
   -webkit-appearance: none;
   appearance: none;
   height: 4px;
@@ -514,6 +630,12 @@ body {
   cursor: pointer;
 }
 
+.vol__line input[type="range"]:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.vol__line input[type="range"]::-webkit-slider-thumb,
 .volume input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 14px;
@@ -523,12 +645,67 @@ body {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
 }
 
+.vol__line input[type="range"]::-moz-range-thumb,
 .volume input[type="range"]::-moz-range-thumb {
   width: 14px;
   height: 14px;
   border: none;
   border-radius: 50%;
   background: #fff;
+}
+
+/* Sticker picker, anchored above the composer. */
+.popover--stickers {
+  left: 12px;
+  right: 12px;
+  bottom: calc(100% - 4px);
+  width: auto;
+}
+
+.sticker-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+}
+
+.sticker-grid button {
+  aspect-ratio: 1;
+  border-radius: 10px;
+  font-size: 24px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.sticker-grid button:hover {
+  background: var(--fill-3);
+}
+
+.sticker-grid button:active {
+  transform: scale(0.9);
+}
+
+.composer__sticker {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  flex: none;
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  line-height: 1;
+  background: var(--fill-3);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.composer__sticker[data-on="true"] {
+  background: var(--accent);
+}
+
+.msg__sticker {
+  font-size: 40px;
+  line-height: 1.15;
 }
 
 @media (max-width: 720px) {
@@ -686,6 +863,7 @@ body {
 }
 
 .composer {
+  position: relative;
   flex: none;
   display: flex;
   align-items: flex-end;
@@ -711,7 +889,7 @@ body {
   color: var(--label-3);
 }
 
-.composer button {
+.composer__send {
   width: 34px;
   height: 34px;
   border-radius: 50%;
@@ -723,11 +901,11 @@ body {
   transition: opacity var(--dur-fast) var(--ease-out);
 }
 
-.composer button[disabled] {
+.composer__send[disabled] {
   opacity: 0.35;
 }
 
-.composer button svg {
+.composer__send svg {
   width: 17px;
   height: 17px;
 }

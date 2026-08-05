@@ -39,6 +39,9 @@ export class HyperbeamClient {
     this.height = config.height || DEFAULTS.height
     this.startUrl = config.startUrl || DEFAULTS.startUrl
     this.offlineTimeout = config.offlineTimeout ?? DEFAULTS.offlineTimeout
+    // Left unset by default: `user_agent` is only sent when asked for, so an
+    // unsupported value can never break a session nobody opted into.
+    this.userAgent = config.userAgent || null
   }
 
   /** True when the configured key is a test key (limited minutes). */
@@ -89,15 +92,36 @@ export class HyperbeamClient {
    * Resolves to `{ session_id, embed_url, admin_token }`.
    */
   async createSession({ startUrl, width, height } = {}) {
-    return this.#request("/vm", {
-      method: "POST",
-      body: {
-        start_url: startUrl || this.startUrl,
-        width: width || this.width,
-        height: height || this.height,
-        offline_timeout: this.offlineTimeout,
-      },
-    })
+    const body = {
+      start_url: startUrl || this.startUrl,
+      width: width || this.width,
+      height: height || this.height,
+      offline_timeout: this.offlineTimeout,
+    }
+
+    if (!this.userAgent) return this.#request("/vm", { method: "POST", body })
+
+    try {
+      // Hyperbeam documents one preset, `chrome_android`. Whether it also takes
+      // a raw UA string is not something this project can verify, so the value
+      // is passed straight through and the API decides.
+      return await this.#request("/vm", {
+        method: "POST",
+        body: { ...body, user_agent: this.userAgent },
+      })
+    } catch (err) {
+      // A rejected user agent must not cost anyone their film night: fall back
+      // to the default browser rather than leaving the room unable to open.
+      if (err instanceof HyperbeamError && err.status >= 400 && err.status < 500) {
+        console.warn(
+          `[hyperbeam] user_agent rechazado (${err.message}). ` +
+            "Abriendo la sesión con el agente por defecto.",
+        )
+        this.userAgentRejected = true
+        return this.#request("/vm", { method: "POST", body })
+      }
+      throw err
+    }
   }
 
   /** Fetch the current state of a session. */

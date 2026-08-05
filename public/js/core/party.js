@@ -49,6 +49,8 @@ export function connectParty({ name, onEvent }) {
 
   return {
     chat: (text) => send({ type: "chat", text }),
+    sticker: (id) => send({ type: "sticker", id }),
+    audio: (patch) => send({ type: "audio", ...patch }),
     rename(next) {
       currentName = next
       send({ type: "rename", name: next })

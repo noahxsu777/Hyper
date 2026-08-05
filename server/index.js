@@ -17,6 +17,7 @@ const config = {
   height: Number(process.env.HB_HEIGHT) || undefined,
   startUrl: process.env.HB_START_URL,
   offlineTimeout: process.env.HB_OFFLINE_TIMEOUT ? Number(process.env.HB_OFFLINE_TIMEOUT) : undefined,
+  userAgent: process.env.HB_USER_AGENT,
 }
 
 // Fly (and most hosts) set an app name in the environment. Telling someone on
@@ -75,6 +76,7 @@ app.get("/api/config", (_req, res) => {
     width: hyperbeam?.width ?? null,
     height: hyperbeam?.height ?? null,
     roomName: process.env.ROOM_NAME || "Sala de cine",
+    userAgent: hyperbeam?.userAgent ?? null,
   })
 })
 

@@ -31,6 +31,7 @@ misma sala. La app arranca aunque no haya clave: te dirá exactamente qué falta
 | `HYPERBEAM_API_URL` | `https://engine.hyperbeam.com/v0` | Base de la API REST. |
 | `HB_WIDTH` / `HB_HEIGHT` | `1280` / `720` | Resolución del navegador. 16:9, que es como son las películas. |
 | `HB_START_URL` | `https://www.google.com` | Página inicial. |
+| `HB_USER_AGENT` | (vacío) | User agent del navegador virtual. Vacío = Chrome de escritorio. |
 | `HB_OFFLINE_TIMEOUT` | `60` | Segundos sin nadie conectado antes de que la máquina se apague sola. |
 | `ROOM_NAME` | `Sala de cine` | Nombre que aparece arriba. |
 | `PORT` | `3000` | Puerto del servidor. |
@@ -93,10 +94,36 @@ watch party, una máquina sobra.
    El teclado también funciona directamente: cualquier tecla que pulses va a la
    película, **salvo** mientras escribes en el chat.
 
-5. El volumen y el botón de silencio son **tuyos**: cada uno se lo ajusta sin
-   molestar al resto.
+5. El botón del altavoz abre un panel con **dos barras independientes**:
+   - **Solo para ti** — tu volumen. Nadie más lo nota.
+   - **Para toda la sala** — el volumen de la película para todos. Manda las
+     teclas de volumen al reproductor remoto (5% por paso en YouTube, Twitch y
+     Vimeo), y su valor viaja por el socket, así que la barra de todos se mueve
+     a la vez y quien llegue tarde la ve donde está. Solo quien la mueve manda
+     las teclas: si lo hicieran todos, el volumen bajaría una vez por persona.
+     El silencio compartido sí es exacto, porque usa la API de pestañas.
+
+   El panel se cierra con la X, con `Esc` o tocando fuera.
 6. **Modo cine** esconde el chat; el botón de al lado pone la ventana a pantalla
    completa.
+7. El botón 🙂 del chat abre los **stickers**. El catálogo lo define el servidor
+   y solo acepta identificadores de esa lista, así que nadie puede colar
+   contenido propio en el chat de los demás.
+
+### El user agent del navegador compartido
+
+`HB_USER_AGENT` cambia el user agent que anuncia **el navegador virtual**, no el
+tuyo. Se envía como `user_agent` en la llamada que crea la sesión, así que las
+webs ven ese navegador cuando les pide la película.
+
+Hyperbeam solo documenta un preset, `chrome_android`, que sirve para que las
+webs den su versión móvil. **No hay preset de iPad.** Una cadena propia se pasa
+tal cual y decide su API; este proyecto no ha podido comprobar si la acepta, así
+que si la rechaza el servidor reintenta con el agente por defecto en vez de
+dejar la sala sin poder abrir. Lo verás en ⚙ y en los logs.
+
+Para confirmar cuál se está usando de verdad, abre el navegador compartido en
+`whatismybrowser.com/detect/what-is-my-user-agent`.
 
 ### Sobre el DRM
 
