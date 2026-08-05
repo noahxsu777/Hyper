@@ -1,23 +1,55 @@
-# fly.toml app configuration file generated for hyper-gt9mvq on 2026-08-05T06:52:47Z
+# fly.toml — configuración de la watch party
 #
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+# IMPORTANTE: esta aplicación debe correr en UNA sola máquina.
+# La presencia, el chat y la sesión compartida de Hyperbeam viven en la memoria
+# de este proceso. Con dos máquinas detrás del balanceador, dos personas caen en
+# procesos distintos: no se ven, el chat se parte en dos y cada máquina abre su
+# propio navegador virtual, gastando el doble de minutos.
 #
+#   fly scale count 1
+#
+# Ver https://fly.io/docs/reference/configuration/
 
 app = 'hyper-gt9mvq'
 primary_region = 'ams'
 
 [build]
 
+[env]
+  # Fly no define PORT por su cuenta: sin esto el servidor escucharía en el 3000
+  # mientras el proxy enruta al 8080, donde no hay nadie escuchando.
+  PORT = '8080'
+  ROOM_NAME = 'Sala de cine'
+  HB_WIDTH = '1280'
+  HB_HEIGHT = '720'
+  HB_START_URL = 'https://www.google.com'
+  # Segundos sin nadie conectado antes de que Hyperbeam apague la máquina virtual.
+  HB_OFFLINE_TIMEOUT = '60'
+
 [http_service]
   internal_port = 8080
   force_https = true
+  # Al parar, Fly manda SIGINT y el servidor termina la sesión de Hyperbeam
+  # antes de morir, para no seguir gastando minutos.
   auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 0
   processes = ['app']
 
+  # Los WebSocket son conexiones de larga duración, así que los límites van
+  # holgados: una sala llena mantiene muchas abiertas a la vez.
+  [http_service.concurrency]
+    type = 'connections'
+    soft_limit = 200
+    hard_limit = 250
+
+  [[http_service.checks]]
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '10s'
+    method = 'GET'
+    path = '/api/config'
+
 [[vm]]
-  memory = '1gb'
-  cpu_kind = 'shared'
-  cpus = 1
-  memory_mb = 256
+  size = 'shared-cpu-1x'
+  memory = '512mb'

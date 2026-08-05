@@ -1,39 +1,37 @@
 # syntax = docker/dockerfile:1
 
-# Adjust NODE_VERSION as desired
 ARG NODE_VERSION=22.21.1
 FROM node:${NODE_VERSION}-slim AS base
 
 LABEL fly_launch_runtime="Node.js"
 
-# Node.js app lives here
 WORKDIR /app
-
-# Set production environment
 ENV NODE_ENV="production"
 
 
-# Throw-away build stage to reduce size of final image
+# --- build stage: install dependencies -------------------------------------
 FROM base AS build
 
-# Install packages needed to build node modules
-RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y build-essential node-gyp pkg-config python-is-python3
-
-# Install node modules
+# Nothing here compiles native code (express, ws and dotenv are pure JS), so the
+# build toolchain the generator installed is not needed.
 COPY package-lock.json package.json ./
-RUN npm ci
 
-# Copy application code
+# `--omit=dev` is safe: @hyperbeam/web is a runtime dependency because the
+# server hands its dist bundle straight to the browser at /vendor/hyperbeam.js.
+RUN npm ci --omit=dev
+
 COPY . .
 
 
-# Final stage for app image
+# --- final image ------------------------------------------------------------
 FROM base
 
-# Copy built application
 COPY --from=build /app /app
 
-# Start the server by default, this can be overwritten at runtime
-EXPOSE 3000
-CMD [ "npm", "run", "start" ]
+EXPOSE 8080
+
+# Run node directly rather than through npm: as PID 1 it receives the SIGINT
+# Fly sends when stopping the machine, which is what triggers the shutdown
+# handler that terminates the Hyperbeam session. Behind `npm run start` the
+# signal would not reach it and the virtual computer would keep billing.
+CMD [ "node", "server/index.js" ]

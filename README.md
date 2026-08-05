@@ -37,6 +37,44 @@ misma sala. La app arranca aunque no haya clave: te dirá exactamente qué falta
 
 ---
 
+## Desplegar en Fly.io
+
+```bash
+fly secrets set HYPERBEAM_API_KEY=sk_test_...   # la clave nunca va en el repo
+fly scale count 1                               # ⚠️ obligatorio, ver abajo
+fly deploy
+```
+
+### Tiene que ser una sola máquina
+
+La presencia, el chat y la sesión compartida viven en la memoria de **este**
+proceso. Con dos máquinas detrás del balanceador de Fly, dos personas que entren
+caen en procesos distintos y pasa esto:
+
+- no se ven en la lista de gente,
+- el chat se parte en dos mitades que no se hablan,
+- **cada máquina abre su propio navegador virtual**, así que gastas el doble de
+  minutos y cada grupo ve una película distinta.
+
+`fly scale count 1` lo arregla. Si algún día hicieran falta varias máquinas,
+habría que mover la sala a un almacén compartido (Redis o similar); para una
+watch party, una máquina sobra.
+
+### Cosas que ya están resueltas en la configuración
+
+- `PORT = '8080'` en `fly.toml`, igual que `internal_port`. Fly no define `PORT`
+  por su cuenta: sin esto el servidor escucha en el 3000 y el proxy enruta al
+  8080, donde no hay nadie — la aplicación responde con un error de conexión.
+- El contenedor arranca con `node server/index.js`, no con `npm run start`. Node
+  es PID 1 y recibe el SIGINT que Fly manda al parar la máquina, que es lo que
+  dispara el apagado de la sesión de Hyperbeam. Con `npm` en medio la señal no
+  llega y el navegador virtual seguiría facturando.
+- Health check contra `/api/config`.
+- La máquina puede pararse sola cuando no hay nadie (`auto_stop_machines`) y
+  arranca de nuevo con la primera visita.
+
+---
+
 ## Cómo se usa
 
 1. Entras, pones tu nombre y ya estás en la sala.
