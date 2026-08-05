@@ -1,12 +1,14 @@
-# Hyper
+# Watch Party
 
-Un sistema operativo estilo iOS completo dentro del navegador, con una **sala de
-Hyperbeam** real: un Chromium alojado en la nube que se transmite por WebRTC a la
-pantalla, con chat, llamada y teclado remoto.
+Ved películas juntos. Un solo navegador —un Chromium real alojado por
+**Hyperbeam** y transmitido por WebRTC— que todos los de la sala ven a la vez,
+con chat y presencia en tiempo real alrededor.
 
-No usa ningún framework ni paso de compilación: HTML, CSS y módulos ES nativos,
-servidos por un Express mínimo cuya única responsabilidad extra es guardar la
-clave de API de Hyperbeam fuera del navegador.
+No hay que sincronizar nada: no existen varias reproducciones que puedan
+desfasarse, existe **un único navegador** y todos miran su pantalla.
+
+Sin frameworks ni paso de compilación: HTML, CSS y módulos ES nativos, con un
+Express + WebSocket mínimo detrás.
 
 ---
 
@@ -18,124 +20,92 @@ cp .env.example .env      # y pon tu clave en HYPERBEAM_API_KEY
 npm start                 # http://localhost:3000
 ```
 
-El sistema arranca aunque no haya clave configurada: todas las apps funcionan y
-la Sala explica exactamente qué falta.
+Comparte esa dirección (o el botón **Invitar**) y quien la abra entra en la
+misma sala. La app arranca aunque no haya clave: te dirá exactamente qué falta.
 
 ### Variables de entorno
 
 | Variable | Por defecto | Para qué sirve |
 | --- | --- | --- |
-| `HYPERBEAM_API_KEY` | — | Clave de tu panel de Hyperbeam. **Obligatoria** para el navegador virtual. |
+| `HYPERBEAM_API_KEY` | — | Clave de tu panel de Hyperbeam. **Obligatoria** para el navegador compartido. |
 | `HYPERBEAM_API_URL` | `https://engine.hyperbeam.com/v0` | Base de la API REST. |
-| `HB_WIDTH` / `HB_HEIGHT` | `720` / `1280` | Resolución del ordenador virtual (vertical, para que encaje en el teléfono). |
-| `HB_START_URL` | `https://www.google.com` | Página inicial de la sala. |
-| `HB_OFFLINE_TIMEOUT` | `60` | Segundos sin clientes conectados antes de que la VM se apague sola. |
+| `HB_WIDTH` / `HB_HEIGHT` | `1280` / `720` | Resolución del navegador. 16:9, que es como son las películas. |
+| `HB_START_URL` | `https://www.google.com` | Página inicial. |
+| `HB_OFFLINE_TIMEOUT` | `60` | Segundos sin nadie conectado antes de que la máquina se apague sola. |
+| `ROOM_NAME` | `Sala de cine` | Nombre que aparece arriba. |
 | `PORT` | `3000` | Puerto del servidor. |
 
 ---
 
-## La Sala (Hyperbeam)
+## Cómo se usa
 
-Es la pantalla principal, y reproduce la sala de Hyperbeam: navegador arriba,
-panel de tres pestañas abajo.
+1. Entras, pones tu nombre y ya estás en la sala.
+2. Alguien pulsa **Abrir el navegador compartido**. A todos los demás se les
+   conecta solo: no hay que darle a nada.
+3. Pones una película desde los accesos directos o escribiendo la dirección.
+4. La barra de abajo controla la reproducción para toda la sala, porque manda
+   las teclas al navegador remoto:
 
-- **Abrir un navegador nuevo** arranca un ordenador virtual y lo transmite.
-- **Chat** — mensajes de la sala, guardados en el dispositivo.
-- **Llamada** — participantes y silenciar micrófono.
-- **Teclado** — lo que escribas se envía al navegador remoto con `hb.sendEvent()`,
-  incluidas teclas especiales (Intro, Borrar, Tab, flechas).
-- **⚙** abre una hoja con el estado de la sesión, la resolución y el botón para
-  terminar la VM.
-- **👤+** copia el enlace de la sala al portapapeles.
+   | Control | Tecla que envía | Qué hace en YouTube, Twitch, Vimeo… |
+   | --- | --- | --- |
+   | ⏯ | `espacio` | Reproducir / pausar |
+   | ⏪ ⏩ | `←` `→` | Retroceder / avanzar |
+   | Recargar | — | Recarga la pestaña |
 
-Una vez abierto el navegador aparece la barra de direcciones: escribe un dominio
-para navegar o cualquier otra cosa para buscar en Google. Atrás, adelante y
-recargar hablan con `hb.tabs`, la misma forma que la API de extensiones de Chrome.
+   El teclado también funciona directamente: cualquier tecla que pulses va a la
+   película, **salvo** mientras escribes en el chat.
 
-### Cómo viaja la clave
+5. El volumen y el botón de silencio son **tuyos**: cada uno se lo ajusta sin
+   molestar al resto.
+6. **Modo cine** esconde el chat; el botón de al lado pone la ventana a pantalla
+   completa.
+
+### Sobre el DRM
+
+YouTube, Twitch, Vimeo, Plex y Archive.org funcionan. Netflix, Prime Video y
+Disney+ usan DRM (Widevine) y puede que se nieguen a reproducir dentro de un
+navegador virtual: eso depende del plan de Hyperbeam, no de esta aplicación. La
+interfaz ya lo avisa en vez de dejarte con una pantalla negra.
+
+---
+
+## Cómo funciona por dentro
 
 ```
 navegador  ──POST /api/session──▶  servidor  ──Authorization: Bearer <clave>──▶  engine.hyperbeam.com/v0/vm
 navegador  ◀────{ embedUrl }─────  servidor  ◀──{ session_id, embed_url, admin_token }──
+           ◀────── WebSocket /ws ─────────▶   presencia · chat · "se ha abierto el navegador"
 ```
 
-La clave y el `admin_token` **nunca** salen del proceso de Node. El navegador solo
-recibe el `embed_url`, que ya está limitado a una única sesión.
+- La clave de API y el `admin_token` **nunca** salen del proceso de Node. El
+  navegador solo recibe el `embed_url`, que ya está limitado a una sesión.
+- Hay **una sola** máquina virtual para toda la sala. Es lo que hace que ver algo
+  juntos funcione, y evita gastar minutos abriendo una por persona.
+- Cuando alguien la abre, el servidor avisa por WebSocket y el resto se conecta
+  automáticamente. Cuando se cierra, pasa lo mismo al revés.
+- Al parar el servidor con Ctrl-C la sesión se termina en Hyperbeam.
 
-Todos los visitantes comparten un mismo ordenador virtual: es lo que hace que la
-sala sea una sala, y evita gastar minutos abriendo una VM por pestaña. Al parar el
-servidor con Ctrl-C la sesión se termina en Hyperbeam.
-
----
-
-## Lo que trae el sistema
-
-**Shell**
-
-- Arranque, pantalla de bloqueo con reloj, widgets y notificaciones
-- Deslizar hacia arriba para desbloquear y para cerrar apps (arrastre interactivo)
-- Springboard con páginas, widget de reloj, indicadores de página y dock
-- Centro de control: conectividad, brillo, volumen, linterna, atajos
-- Spotlight (desliza hacia abajo en el inicio): busca apps, notas y chats
-- Dynamic Island, barra de estado con batería real, banners de notificación
-- Aspecto claro y oscuro, seis fondos, reducir movimiento
-
-**Apps** — todas funcionales, no maquetas:
-
-| App | Qué hace de verdad |
-| --- | --- |
-| Sala | Navegador virtual de Hyperbeam + chat + llamada + teclado remoto |
-| Mensajes | Conversaciones persistidas, indicador de escritura, respuestas |
-| Mail | Bandeja con leídos/no leídos y vista de lectura |
-| Fotos | Biblioteca, álbumes, favoritos y visor |
-| Calendario | Rejilla mensual real, navegación y eventos por día |
-| Notas | Crear, editar, buscar y borrar, guardado en el dispositivo |
-| Recordatorios | Lista de tareas con completar y eliminar |
-| Reloj | Reloj mundial, alarmas, cronómetro con vueltas, temporizador |
-| Tiempo | Previsión por horas y 7 días, con métricas |
-| Música | Reproductor simulado con progreso, scrub y biblioteca |
-| Calculadora | Aritmética completa con la lógica y el teclado de iOS |
-| App Store | Escaparate de las apps del dispositivo |
-| Teléfono | Teclado, recientes, contactos y llamada con duración |
-| Ajustes | Aspecto, fondo, accesibilidad y control de la sesión de Hyperbeam |
-
-Los datos (notas, chats, recordatorios, preferencias) se guardan en
-`localStorage` bajo la clave `hyper-ios:v1`. Ajustes → General → Restablecer los
-borra.
-
-### Atajos de teclado
-
-`Esc` vuelve al inicio · `Espacio` o `Intro` desbloquean · `⌘L` bloquea.
-
----
-
-## Estructura
+### Estructura
 
 ```
 server/
-  index.js        Express: estáticos, /api/config, /api/session
-  hyperbeam.js    Cliente REST de Hyperbeam
+  index.js       Express: estáticos, /api/config, /api/session
+  hyperbeam.js   Cliente REST de Hyperbeam
+  party.js       WebSocket: presencia, chat e historial de la sala
 public/
-  css/            reset · tokens (colores, materiales, muelles) · shell · apps
+  css/           reset · tokens (colores, materiales, muelles) · app
   js/
-    core/         dom · icons (SVG) · store (estado persistido) · gestures · api
-    ui/           statusbar · lockscreen · springboard · controlcenter · spotlight · kit
-    apps/         una app por archivo + registry.js
-    os.js         máquina de estados, ciclo de vida de apps, UI del sistema
-    main.js       arranque y gestos globales
+    core/        dom · icons (SVG) · api · party (socket) · store
+    main.js      La sala entera
 ```
-
-Para añadir una app: crea `public/js/apps/loquesea.js` exportando
-`{ id, name, icon, gradient, mount(root, ctx) }` y añádela a `registry.js`. El
-`ctx` te da `close()`, `toast()`, `island()` y `openApp()`.
 
 ---
 
 ## Notas
 
-- Las claves `sk_test_` tienen minutos limitados. Termina la sesión desde
-  Ajustes → Hyperbeam o desde la ⚙ de la Sala cuando acabes.
-- No hay ninguna imagen en el proyecto: fondos, fotos y carátulas son degradados
-  generados, así que todo el sistema es un único paquete autocontenido.
-- El navegador virtual necesita salida a `engine.hyperbeam.com` y a los servidores
-  WebRTC de Hyperbeam. Si tu red los bloquea, la Sala te lo dirá con el error exacto.
+- Las claves `sk_test_` tienen minutos limitados: cierra el navegador compartido
+  desde ⚙ cuando terminéis.
+- El chat vive en memoria del servidor (los últimos 120 mensajes). Si reinicias
+  el servidor, se vacía. Tu nombre y tu volumen sí se guardan en tu navegador.
+- Hace falta salida a `engine.hyperbeam.com` y a los servidores WebRTC de
+  Hyperbeam. Si tu red los bloquea, la sala te muestra el error exacto.

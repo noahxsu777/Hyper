@@ -1,8 +1,8 @@
 {
-  "name": "hyper-ios",
+  "name": "watch-party",
   "version": "1.0.0",
   "private": true,
-  "description": "A complete iOS-style operating system in the browser, with a real virtual browser powered by the Hyperbeam API.",
+  "description": "Watch films together in one shared Hyperbeam browser, with live chat and presence.",
   "type": "module",
   "main": "server/index.js",
   "engines": {
@@ -15,6 +15,7 @@
   "dependencies": {
     "@hyperbeam/web": "^0.0.38",
     "dotenv": "^16.4.5",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "ws": "^8.21.2"
   }
 }

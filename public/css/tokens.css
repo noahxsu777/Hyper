@@ -1,4 +1,4 @@
-/* Design tokens mirroring iOS: type ramp, system colours, materials, springs. */
+/* Design tokens: iOS type ramp, system colours, materials and spring curves. */
 
 :root {
   --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
@@ -6,7 +6,11 @@
   --font-rounded: -apple-system, "SF Pro Rounded", "SF Pro Display", var(--font-ui);
   --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
 
-  /* iOS system colours (dark appearance) */
+  /* Brand */
+  --accent: #7c5cff;
+  --accent-soft: #a78bfa;
+
+  /* iOS system colours, dark appearance */
   --tint: #0a84ff;
   --green: #30d158;
   --red: #ff453a;
@@ -21,74 +25,27 @@
   /* Labels */
   --label: #ffffff;
   --label-2: rgba(235, 235, 245, 0.6);
-  --label-3: rgba(235, 235, 245, 0.3);
-  --label-4: rgba(235, 235, 245, 0.18);
+  --label-3: rgba(235, 235, 245, 0.32);
 
-  /* Grouped backgrounds */
+  /* Backgrounds */
   --bg: #000000;
-  --bg-elevated: #1c1c1e;
-  --bg-grouped: #000000;
+  --bg-elevated: #0f0f13;
   --bg-grouped-secondary: #1c1c1e;
   --bg-grouped-tertiary: #2c2c2e;
-  --separator: rgba(84, 84, 88, 0.65);
+  --separator: rgba(84, 84, 88, 0.55);
   --fill: rgba(120, 120, 128, 0.36);
-  --fill-2: rgba(120, 120, 128, 0.24);
+  --fill-2: rgba(120, 120, 128, 0.26);
   --fill-3: rgba(120, 120, 128, 0.18);
 
   /* Materials */
-  --material-thin: rgba(30, 30, 32, 0.62);
-  --material-regular: rgba(28, 28, 30, 0.78);
-  --material-thick: rgba(18, 18, 20, 0.9);
+  --material-regular: rgba(22, 22, 26, 0.78);
+  --material-thick: rgba(18, 18, 22, 0.92);
   --blur-thin: saturate(180%) blur(20px);
   --blur-regular: saturate(180%) blur(30px);
-  --blur-thick: saturate(180%) blur(48px);
-
-  /* Metrics */
-  --radius-device: 54px;
-  --radius-card: 22px;
-  --radius-sheet: 38px;
-  --safe-top: 54px;
-  --safe-bottom: 34px;
 
   /* Motion — iOS leans on springs, approximated with these curves */
   --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
   --ease-out: cubic-bezier(0.25, 0.46, 0.45, 0.94);
-  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
-  --dur-fast: 220ms;
-  --dur: 380ms;
-  --dur-slow: 520ms;
-}
-
-/* Light appearance, toggled from Settings */
-.device[data-appearance="light"] {
-  --label: #000000;
-  --label-2: rgba(60, 60, 67, 0.6);
-  --label-3: rgba(60, 60, 67, 0.3);
-  --label-4: rgba(60, 60, 67, 0.18);
-
-  --bg: #ffffff;
-  --bg-elevated: #ffffff;
-  --bg-grouped: #f2f2f7;
-  --bg-grouped-secondary: #ffffff;
-  --bg-grouped-tertiary: #f2f2f7;
-  --separator: rgba(60, 60, 67, 0.29);
-  --fill: rgba(120, 120, 128, 0.2);
-  --fill-2: rgba(120, 120, 128, 0.16);
-  --fill-3: rgba(120, 120, 128, 0.12);
-
-  --material-thin: rgba(249, 249, 252, 0.68);
-  --material-regular: rgba(249, 249, 252, 0.82);
-  --material-thick: rgba(255, 255, 255, 0.92);
-
-  --tint: #007aff;
-  --green: #34c759;
-  --red: #ff3b30;
-  --orange: #ff9500;
-  --purple: #af52de;
-}
-
-/* Reduce Motion, toggled from Settings > Accessibility */
-.device[data-reduce-motion="true"] * {
-  animation-duration: 0.01ms !important;
-  transition-duration: 0.01ms !important;
+  --dur-fast: 200ms;
+  --dur: 360ms;
 }

@@ -10,8 +10,8 @@
 
 const DEFAULTS = {
   apiUrl: "https://engine.hyperbeam.com/v0",
-  width: 720,
-  height: 1280,
+  width: 1280,
+  height: 720,
   startUrl: "https://www.google.com",
   offlineTimeout: 60,
 }

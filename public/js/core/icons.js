@@ -132,6 +132,12 @@ const PATHS = {
   hand: '<path d="M8.5 11V5.4a1.6 1.6 0 013.2 0V11m0-1.2V4.2a1.6 1.6 0 013.2 0V11m0-.6a1.6 1.6 0 013.2 0v5.4A5.5 5.5 0 0112.6 21h-1a5 5 0 01-4.2-2.4L5 14.8a1.6 1.6 0 012.5-2l1 1.2"/>',
   face: '<circle cx="12" cy="12" r="9"/><circle cx="9" cy="10.2" r="1.1" fill="currentColor"/><circle cx="15" cy="10.2" r="1.1" fill="currentColor"/><path d="M8.6 15a4.6 4.6 0 006.8 0"/>',
   text: '<path d="M4 6.5h16M4 12h16M4 17.5h10"/>',
+  expand:
+    '<path d="M9 3.5H4.5a1 1 0 00-1 1V9M15 3.5h4.5a1 1 0 011 1V9M9 20.5H4.5a1 1 0 01-1-1V15M15 20.5h4.5a1 1 0 001-1V15"/>',
+  collapse:
+    '<path d="M4 9h4.5a1 1 0 001-1V3.5M20 9h-4.5a1 1 0 01-1-1V3.5M4 15h4.5a1 1 0 011 1v4.5M20 15h-4.5a1 1 0 00-1 1v4.5"/>',
+  users:
+    '<circle cx="9" cy="8.5" r="3.4"/><path d="M2.8 19.4a6.4 6.4 0 0112.4 0"/><path d="M16.2 5.6a3.4 3.4 0 010 5.8M17.8 19.4a6.5 6.5 0 00-1.5-4"/>',
   keyboard:
     '<rect x="2.2" y="5.5" width="19.6" height="13" rx="2.6"/><path d="M6 9h.01M9.5 9h.01M13 9h.01M16.5 9h.01M6 12.2h.01M9.5 12.2h.01M13 12.2h.01M16.5 12.2h.01" stroke-width="2.2"/><path d="M8 15.4h8"/>',
   hyperbeam:

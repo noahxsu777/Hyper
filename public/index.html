@@ -2,63 +2,42 @@
 <html lang="es">
   <head>
     <meta charset="utf-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no, maximum-scale=1"
-    />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#000000" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta
       name="description"
-      content="A complete iOS-style operating system in the browser, with a real virtual browser powered by Hyperbeam."
+      content="Ved películas juntos en un navegador compartido de Hyperbeam, con chat en tiempo real."
     />
-    <title>Hyper — iOS</title>
+    <title>Watch Party</title>
 
     <link rel="stylesheet" href="/css/reset.css" />
     <link rel="stylesheet" href="/css/tokens.css" />
-    <link rel="stylesheet" href="/css/shell.css" />
-    <link rel="stylesheet" href="/css/apps.css" />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='24' fill='%230a84ff'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/css/app.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='24' fill='%237c5cff'/%3E%3Cpath d='M38 32l30 18-30 18z' fill='white'/%3E%3C/svg%3E"
+    />
   </head>
   <body>
-    <!-- Desk surface behind the phone on wide screens -->
-    <div id="stage" class="stage">
-      <div id="device" class="device" data-state="booting">
-        <!-- Wallpaper sits below everything and blurs when the OS wants depth -->
-        <div class="wallpaper" id="wallpaper" aria-hidden="true"></div>
+    <div class="app" id="app" data-theatre="false">
+      <header class="topbar" id="topbar"></header>
 
-        <!-- Boot -->
-        <div class="boot" id="boot" aria-hidden="true">
-          <div class="boot__mark"></div>
-          <div class="boot__bar"><span></span></div>
-        </div>
-
-        <!-- Screen layers, painted back to front -->
+      <main class="stage" id="stage">
         <div class="screen" id="screen">
-          <div class="layer layer--springboard" id="springboard"></div>
-          <div class="layer layer--app" id="appLayer" hidden></div>
-          <div class="layer layer--lock" id="lockscreen"></div>
-          <div class="layer layer--spotlight" id="spotlight" hidden></div>
-          <div class="layer layer--cc" id="controlCenter" hidden></div>
+          <div class="screen__mount" id="screenMount"></div>
+          <div class="screen__badge" id="screenBadge" hidden></div>
+          <div class="screen__overlay" id="screenOverlay"></div>
         </div>
+        <div class="controls" id="controls" hidden></div>
+      </main>
 
-        <!-- Chrome that floats over every layer -->
-        <div class="statusbar" id="statusbar"></div>
-        <div class="dynamic-island" id="dynamicIsland">
-          <div class="island__content" id="islandContent"></div>
-        </div>
-        <div class="home-indicator" id="homeIndicator" role="button" tabindex="0" aria-label="Inicio"></div>
-
-        <!-- Transient system UI -->
-        <div class="toasts" id="toasts" aria-live="polite"></div>
-      </div>
-
-      <p class="stage__hint" id="stageHint">
-        Arrastra hacia arriba desde abajo para volver al inicio · Desliza desde
-        arriba a la derecha para el Centro de control
-      </p>
+      <aside class="panel" id="panel"></aside>
     </div>
+
+    <div class="sheets" id="sheets"></div>
+    <div class="toasts" id="toasts" aria-live="polite"></div>
 
     <script type="module" src="/js/main.js"></script>
   </body>
