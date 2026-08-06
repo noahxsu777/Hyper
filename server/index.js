@@ -170,7 +170,10 @@ const server = app.listen(PORT, () => {
   }
 })
 
-const party = createParty(server, { getSession: () => publicSession(current) })
+const party = createParty(server, {
+  getSession: () => publicSession(current),
+  ownerGraceMs: Number(process.env.ROOM_OWNER_GRACE_MS) || undefined,
+})
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, async () => {

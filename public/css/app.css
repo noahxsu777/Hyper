@@ -1265,3 +1265,22 @@ body {
   padding: 1px 7px;
   font-size: 10.5px;
 }
+
+/* The stall badge offers a way out instead of spinning forever. */
+.screen__badge {
+  pointer-events: auto;
+}
+
+.badge__retry {
+  margin-left: 4px;
+  padding: 3px 10px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.badge__retry:hover {
+  filter: brightness(1.1);
+}

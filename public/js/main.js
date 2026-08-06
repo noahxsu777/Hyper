@@ -66,6 +66,8 @@ const room = {
   isOwner: false,
   /** The film's own volume, shared by the whole room. */
   audio: { volume: 100, muted: false },
+  /** Last state the Hyperbeam stream reported. */
+  connection: "idle",
 }
 
 /* --------------------------------------------------------------------------
@@ -841,6 +843,57 @@ async function join(session) {
   }
 }
 
+let stallTimer = null
+let reattaching = false
+
+/** The badge, with a way out for someone staring at a spinner. */
+function showStalled(text) {
+  els.badge.hidden = false
+  fill(
+    els.badge,
+    h("span.spinner", { style: { width: "13px", height: "13px" } }),
+    h("span", { text }),
+    h("button.badge__retry", { type: "button", text: "Reintentar", onClick: () => reattach() }),
+  )
+}
+
+/**
+ * Tear the stream down and build it again from the session the server still
+ * has. Coming back to a backgrounded tab often leaves the WebRTC connection
+ * beyond saving, and no amount of waiting brings it round.
+ */
+async function reattach() {
+  if (reattaching || !room.hb) return
+  reattaching = true
+  clearTimeout(stallTimer)
+  showStalled("Reconectando…")
+
+  try {
+    try {
+      room.hb.destroy()
+    } catch {
+      /* it was already gone */
+    }
+    room.hb = null
+    els.mount.replaceChildren()
+
+    const session = await api.getSession()
+    if (!session) {
+      renderTopbar()
+      renderControls()
+      showIdle("El navegador compartido se ha cerrado.")
+      return
+    }
+    const { default: Hyperbeam } = await import("/vendor/hyperbeam.js")
+    await attach(Hyperbeam, session)
+  } catch (error) {
+    console.error("[party] no se pudo recuperar el vídeo", error)
+    showStalled("Sin conexión")
+  } finally {
+    reattaching = false
+  }
+}
+
 async function attach(Hyperbeam, session) {
   showLoading("Conectando con el vídeo…")
 
@@ -859,11 +912,24 @@ async function attach(Hyperbeam, session) {
       )
     },
     onConnectionStateChange: ({ state: connection }) => {
-      if (connection === "reconnecting") {
-        els.badge.hidden = false
-        fill(els.badge, h("span.spinner", { style: { width: "13px", height: "13px" } }), "Reconectando…")
-      } else if (connection === "playing") {
+      room.connection = connection
+      if (connection === "playing") {
+        clearTimeout(stallTimer)
         els.badge.hidden = true
+        return
+      }
+      if (connection === "reconnecting") {
+        showStalled("Reconectando…")
+        // If it is still stuck after this, the stream is not coming back on its
+        // own and a fresh attach is the only thing that will fix it.
+        clearTimeout(stallTimer)
+        stallTimer = setTimeout(reattach, 9000)
+        return
+      }
+      if (connection === "failed") {
+        showStalled("Se perdió la conexión")
+        clearTimeout(stallTimer)
+        stallTimer = setTimeout(reattach, 1500)
       }
     },
     onCloseWarning: () =>
@@ -877,6 +943,9 @@ async function attach(Hyperbeam, session) {
 
   // A guest watches: their clicks and keys never reach the shared browser.
   room.hb.disableInput = !room.isOwner
+  room.connection = "playing"
+  clearTimeout(stallTimer)
+  els.badge.hidden = true
 
   room.starting = false
   els.overlay.hidden = true
@@ -1107,6 +1176,22 @@ for (const type of ["keydown", "keyup"]) {
   )
 }
 
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible" || !room.hb) return
+  // A backgrounded tab has its media suspended; nudge it, and if the nudge does
+  // not take, rebuild the stream rather than leave a spinner up forever.
+  if (room.connection !== "playing") {
+    try {
+      room.hb.reconnect()
+    } catch {
+      /* the SDK is past nudging */
+    }
+    clearTimeout(stallTimer)
+    stallTimer = setTimeout(reattach, 6000)
+  }
+  fitToScreen()
+})
+
 window.addEventListener("resize", () => fitToScreen())
 document.addEventListener("fullscreenchange", () => setTimeout(fitToScreen, 200))
 
@@ -1153,6 +1238,7 @@ async function boot() {
 
   room.socket = connectParty({
     name,
+    clientId: state.clientId,
     onEvent(event) {
       switch (event.type) {
         case "status":

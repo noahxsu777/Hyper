@@ -3,6 +3,12 @@
 const KEY = "watch-party:v1"
 
 const DEFAULTS = {
+  /**
+   * Who this browser is, across reloads and locked screens. The room uses it to
+   * recognise someone coming back instead of counting them twice — and to keep
+   * the host their room.
+   */
+  clientId: "",
   name: "",
   volume: 0.85,
   muted: false,
@@ -19,6 +25,16 @@ function load() {
 }
 
 export const state = load()
+
+if (!state.clientId) {
+  state.clientId =
+    globalThis.crypto?.randomUUID?.() ?? `c${Date.now()}-${Math.random().toString(36).slice(2)}`
+  try {
+    localStorage.setItem(KEY, JSON.stringify(state))
+  } catch {
+    /* private mode: identity lasts for this tab only */
+  }
+}
 
 export function set(patch) {
   Object.assign(state, patch)

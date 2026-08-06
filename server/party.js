@@ -62,7 +62,7 @@ const COMMAND_BY_NAME = new Map(COMMANDS.map((entry) => [entry.command, entry]))
 
 /** @typedef {{ id: string, name: string, joinedAt: number }} Viewer */
 
-export function createParty(server, { path = "/ws", getSession } = {}) {
+export function createParty(server, { path = "/ws", getSession, ownerGraceMs } = {}) {
   const wss = new WebSocketServer({ server, path })
 
   /** @type {Map<import("ws").WebSocket, Viewer>} */
@@ -83,25 +83,49 @@ export function createParty(server, { path = "/ws", getSession } = {}) {
    * watches. Ownership is a capability, not a checkbox — the owner is handed a
    * secret the HTTP routes demand before they will start or stop the browser,
    * so hiding the buttons is not the only thing standing in the way.
+   *
+   * It is pinned to the browser that claimed it, not to the socket. Phones
+   * drop sockets constantly — locking the screen is enough — and losing the
+   * room because you glanced at a notification would be absurd.
    */
-  let owner = null
+  let ownerClientId = null
   let ownerToken = null
+  let handoverTimer = null
+
+  /** How long the room waits for its owner before letting someone else run it. */
+  const OWNER_GRACE_MS = ownerGraceMs ?? 3 * 60 * 1000
+
+  /** Departure notices in flight, so a quick return cancels its own goodbye. */
+  const goodbyes = new Map()
+
+  const viewerByClientId = (clientId) =>
+    [...viewers.values()].find((viewer) => viewer.clientId === clientId) ?? null
+
+  const ownerViewer = () => (ownerClientId ? viewerByClientId(ownerClientId) : null)
 
   function claimOwnership(viewer) {
-    owner = viewer
+    clearTimeout(handoverTimer)
+    handoverTimer = null
+    ownerClientId = viewer.clientId
     ownerToken = randomBytes(24).toString("base64url")
     send(viewer.socket, { type: "owner", you: true, token: ownerToken, ownerId: viewer.id })
   }
 
-  /** The room should never be left without someone able to put a film on. */
-  function passOwnership() {
-    const next = [...viewers.values()].sort((a, b) => a.joinedAt - b.joinedAt)[0]
-    owner = null
-    ownerToken = null
-    if (!next) return
-    claimOwnership(next)
-    system(`${next.name} ahora lleva la sala`)
-    announcePresence()
+  /** Hand the room over only once its owner has really gone for good. */
+  function scheduleHandover() {
+    clearTimeout(handoverTimer)
+    handoverTimer = setTimeout(() => {
+      handoverTimer = null
+      if (ownerViewer()) return // they came back
+      const next = [...viewers.values()].sort((a, b) => a.joinedAt - b.joinedAt)[0]
+      ownerClientId = null
+      ownerToken = null
+      if (!next) return
+      claimOwnership(next)
+      system(`${next.name} ahora lleva la sala`)
+      announcePresence()
+    }, OWNER_GRACE_MS)
+    handoverTimer.unref?.()
   }
 
   const clean = (value, limit) =>
@@ -128,7 +152,7 @@ export function createParty(server, { path = "/ws", getSession } = {}) {
   }
 
   function announcePresence() {
-    broadcast({ type: "presence", viewers: roster(), ownerId: owner?.id ?? null })
+    broadcast({ type: "presence", viewers: roster(), ownerId: ownerViewer()?.id ?? null })
   }
 
   /** Post a system line ("X se ha unido") into the chat. */
@@ -155,23 +179,45 @@ export function createParty(server, { path = "/ws", getSession } = {}) {
 
       if (payload.type === "join") {
         const name = clean(payload.name, NAME_LIMIT) || `Invitado ${nextId}`
-        const viewer = { id: `v${nextId++}`, name, joinedAt: Date.now(), socket }
+        const clientId = clean(payload.clientId, 64) || `anon-${nextId}`
+
+        // Coming back from a locked screen or a refresh is the same person, not
+        // a second one. Retire the stale socket and keep the identity.
+        const returning = viewerByClientId(clientId)
+        let viewer
+        if (returning) {
+          const staleSocket = returning.socket
+          viewers.delete(staleSocket)
+          if (staleSocket !== socket) staleSocket.close()
+          viewer = { ...returning, name, socket }
+        } else {
+          viewer = { id: `v${nextId++}`, clientId, name, joinedAt: Date.now(), socket }
+        }
         viewers.set(socket, viewer)
-        if (!owner) claimOwnership(viewer)
+
+        // They are back before the room finished saying goodbye.
+        const goodbye = goodbyes.get(clientId)
+        if (goodbye) {
+          clearTimeout(goodbye)
+          goodbyes.delete(clientId)
+        }
+
+        if (!ownerClientId) claimOwnership(viewer)
+        else if (ownerClientId === clientId) claimOwnership(viewer) // the owner is back
 
         send(socket, {
           type: "welcome",
           you: { id: viewer.id, name: viewer.name },
           viewers: roster(),
           history,
-          ownerId: owner?.id ?? null,
+          ownerId: ownerViewer()?.id ?? null,
           stickers: STICKERS,
           commands: COMMANDS.map(({ command, label }) => ({ command, label })),
           audio,
           session: getSession?.() ?? null,
         })
         announcePresence()
-        system(`${viewer.name} se ha unido`)
+        if (!returning && !goodbye) system(`${viewer.name} se ha unido`)
         return
       }
 
@@ -229,7 +275,7 @@ export function createParty(server, { path = "/ws", getSession } = {}) {
       }
 
       if (payload.type === "audio") {
-        if (owner?.id !== viewer.id) return
+        if (ownerClientId !== viewer.clientId) return
         // Only the viewer who moved the control drives the remote player; the
         // rest just follow, otherwise every client would send its own key
         // presses and the volume would move several times over.
@@ -257,8 +303,30 @@ export function createParty(server, { path = "/ws", getSession } = {}) {
       viewers.delete(socket)
       if (!viewer) return
       announcePresence()
-      system(`${viewer.name} ha salido`)
-      if (owner?.id === viewer.id) passOwnership()
+
+      // Locking a phone drops the socket. Wait a little before telling the room
+      // someone left, or the chat fills with goodbyes they never meant.
+      clearTimeout(goodbyes.get(viewer.clientId))
+      const goodbye = setTimeout(() => {
+        goodbyes.delete(viewer.clientId)
+        if (viewerByClientId(viewer.clientId)) return
+        system(`${viewer.name} ha salido`)
+      }, 15000)
+      goodbye.unref?.()
+      goodbyes.set(viewer.clientId, goodbye)
+
+      // An empty room is a finished party: whoever turns up next starts a new
+      // one. Holding the room for a host nobody is waiting for would just lock
+      // the next person out for no reason.
+      if (viewers.size === 0) {
+        clearTimeout(handoverTimer)
+        handoverTimer = null
+        ownerClientId = null
+        ownerToken = null
+        return
+      }
+
+      if (ownerClientId === viewer.clientId) scheduleHandover()
     })
   })
 
@@ -293,7 +361,7 @@ export function createParty(server, { path = "/ws", getSession } = {}) {
       return Boolean(ownerToken) && token === ownerToken
     },
     get hasOwner() {
-      return Boolean(owner)
+      return Boolean(ownerClientId)
     },
     close() {
       clearInterval(heartbeat)

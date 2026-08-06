@@ -34,6 +34,7 @@ misma sala. La app arranca aunque no haya clave: te dirá exactamente qué falta
 | `HB_USER_AGENT` | (vacío) | User agent del navegador virtual. Vacío = Chrome de escritorio. |
 | `HB_OFFLINE_TIMEOUT` | `60` | Segundos sin nadie conectado antes de que la máquina se apague sola. |
 | `ROOM_NAME` | `Sala de cine` | Nombre que aparece arriba. |
+| `ROOM_OWNER_GRACE_MS` | `180000` | Cuánto espera la sala a un anfitrión desconectado antes de pasar el mando. |
 | `PORT` | `3000` | Puerto del servidor. |
 
 ---
@@ -89,8 +90,15 @@ invitado que llame a la API a mano recibe un 403. Además su cliente arranca con
 `disableInput`, así que sus clics y teclas ni siquiera salen hacia el navegador
 compartido.
 
-Si el anfitrión se va, la sala pasa a quien lleve más tiempo dentro, en vez de
-quedarse sin nadie que pueda poner nada.
+El anfitrión lo es **por navegador, no por conexión**. Bloquear el móvil, cambiar
+de app o recargar la página tira el socket, pero al volver sigues siendo el
+anfitrión, apareces una sola vez en la lista y el chat no se llena de "ha salido
+/ se ha unido" (el aviso de salida espera 15 s por si vuelves).
+
+Si el anfitrión desaparece de verdad, la sala espera `ROOM_OWNER_GRACE_MS`
+(3 minutos por defecto) antes de pasar el mando a quien lleve más tiempo dentro.
+Y si no queda nadie, la sala se libera: quien llegue después empieza de cero, en
+vez de quedarse bloqueado esperando a alguien que no va a volver.
 
 > Lo que **no** está blindado: un invitado con las herramientas de desarrollo
 > abiertas podría devolverse el control local sobre el vídeo. Bloquearlo de
@@ -162,6 +170,16 @@ acabó usando, y si tuvo que caer al siguiente te lo dice.
 
 Para confirmar cuál se está usando de verdad, abre el navegador compartido en
 `whatismybrowser.com/detect/what-is-my-user-agent`.
+
+### Cuando vuelves a la app
+
+Un navegador móvil suspende el vídeo al pasar a segundo plano, y al volver la
+conexión WebRTC suele estar muerta aunque el SDK diga que se está reconectando.
+La sala lo trata como lo que es: al volver a primer plano le da un toque
+(`hb.reconnect()`), y si en unos segundos no hay imagen, tira el vídeo y lo
+vuelve a montar desde la sesión que el servidor sigue teniendo. El aviso de
+"Reconectando…" lleva además un botón de **Reintentar**, para no dejarte mirando
+un spinner.
 
 ### Sobre el DRM
 
