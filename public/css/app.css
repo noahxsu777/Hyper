@@ -1192,3 +1192,60 @@ body {
     transform: rotate(360deg);
   }
 }
+
+/* ===========================================================================
+   Chat effects — !love and friends: they play, then they are gone
+   =========================================================================== */
+
+.panel {
+  position: relative;
+}
+
+.effects {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 380ms var(--ease-out);
+}
+
+.effects[data-on="true"] {
+  opacity: 1;
+}
+
+.effects__stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  animation: effectIn 520ms var(--ease-spring);
+}
+
+@keyframes effectIn {
+  from {
+    transform: scale(0.7);
+    opacity: 0;
+  }
+}
+
+.effects__stage iframe {
+  width: min(230px, 62%);
+  aspect-ratio: 1;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
+}
+
+.effects__by {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--label);
+  padding: 4px 12px;
+  border-radius: 12px;
+  background: var(--material-thick);
+  backdrop-filter: var(--blur-thin);
+  -webkit-backdrop-filter: var(--blur-thin);
+}

@@ -40,6 +40,25 @@ export const STICKERS = [
 
 const STICKER_BY_ID = new Map(STICKERS.map((sticker) => [sticker.id, sticker]))
 
+/**
+ * Chat commands that play an animation for everyone and then vanish.
+ *
+ * They deliberately leave nothing in the history: an effect is a moment in the
+ * room, not a message, so someone joining later does not get a screen full of
+ * hearts fired off before they arrived.
+ */
+export const COMMANDS = [
+  {
+    command: "!love",
+    effect: "love",
+    label: "corazones",
+    url: "https://lottie.host/embed/1037deaf-4596-4b2b-a283-78ed6138d9c4/g45P88pxAF.lottie",
+    duration: 5000,
+  },
+]
+
+const COMMAND_BY_NAME = new Map(COMMANDS.map((entry) => [entry.command, entry]))
+
 /** @typedef {{ id: string, name: string, joinedAt: number }} Viewer */
 
 export function createParty(server, { path = "/ws", getSession } = {}) {
@@ -118,6 +137,7 @@ export function createParty(server, { path = "/ws", getSession } = {}) {
           viewers: roster(),
           history,
           stickers: STICKERS,
+          commands: COMMANDS.map(({ command, label }) => ({ command, label })),
           audio,
           session: getSession?.() ?? null,
         })
@@ -132,6 +152,21 @@ export function createParty(server, { path = "/ws", getSession } = {}) {
       if (payload.type === "chat") {
         const text = clean(payload.text, TEXT_LIMIT)
         if (!text) return
+
+        // A command is played, not said: it never reaches the history.
+        const command = COMMAND_BY_NAME.get(text.toLowerCase())
+        if (command) {
+          broadcast({
+            type: "effect",
+            effect: command.effect,
+            url: command.url,
+            duration: command.duration,
+            by: viewer.name,
+            byId: viewer.id,
+          })
+          return
+        }
+
         const entry = {
           id: `m${nextId++}`,
           name: viewer.name,

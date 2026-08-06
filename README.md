@@ -106,7 +106,12 @@ watch party, una máquina sobra.
    El panel se cierra con la X, con `Esc` o tocando fuera.
 6. **Modo cine** esconde el chat; el botón de al lado pone la ventana a pantalla
    completa.
-7. El botón 🙂 del chat abre los **stickers**. El catálogo lo define el servidor
+7. Escribe **`!love`** en el chat y una animación se reproduce para toda la
+   sala y luego se va sola. No deja mensaje: es un momento, no una conversación,
+   así que quien entre después no se encuentra la pantalla llena de corazones.
+   Los comandos los define el servidor (`COMMANDS` en `server/party.js`), así
+   que añadir otro es una línea.
+8. El botón 🙂 del chat abre los **stickers**. El catálogo lo define el servidor
    y solo acepta identificadores de esa lista, así que nadie puede colar
    contenido propio en el chat de los demás.
 

@@ -59,6 +59,8 @@ const room = {
   currentUrl: "",
   /** Stickers the server allows, delivered on join. */
   stickers: [],
+  /** Chat commands the server understands, delivered on join. */
+  commands: [],
   /** The film's own volume, shared by the whole room. */
   audio: { volume: 100, muted: false },
 }
@@ -563,6 +565,11 @@ function renderStickerPicker() {
           ),
         )
       : h("p.vol__note", { text: "Conectando con la sala…" }),
+    room.commands.length
+      ? h("p.vol__note", {
+          text: `Escribe ${room.commands.map((c) => c.command).join(" o ")} en el chat para lanzar una animación.`,
+        })
+      : null,
   )
 }
 
@@ -583,6 +590,45 @@ function toggleStickers() {
 }
 
 const panelBody = h("div.panel__body")
+
+/* ---- chat effects (!love and friends) ------------------------------------ */
+
+const effectLayer = h("div.effects", { "aria-hidden": "true" })
+let effectTimer = null
+
+/**
+ * Play an animation over the chat and take it away again.
+ *
+ * The animation is a third-party embed, so it goes in a sandboxed iframe: it
+ * may run its own scripts, but it cannot navigate us or reach into the page.
+ */
+function playEffect({ url, duration = 5000, by }) {
+  if (!url) return
+  clearTimeout(effectTimer)
+
+  const frame = h("iframe", {
+    src: url,
+    title: "Animación",
+    loading: "eager",
+    referrerpolicy: "no-referrer",
+    sandbox: "allow-scripts allow-same-origin",
+    allowtransparency: "true",
+  })
+
+  fill(
+    effectLayer,
+    h("div.effects__stage", null, frame, by ? h("div.effects__by", { text: by }) : null),
+  )
+  effectLayer.dataset.on = "true"
+
+  effectTimer = setTimeout(() => {
+    effectLayer.dataset.on = "false"
+    // Let the fade finish before dropping the iframe, or it blinks out.
+    setTimeout(() => {
+      if (effectLayer.dataset.on !== "true") fill(effectLayer)
+    }, 400)
+  }, duration)
+}
 
 function sendChat() {
   const text = composerField.value.trim()
@@ -635,7 +681,7 @@ function renderPanel() {
     ),
   )
 
-  fill(els.panel, segmented, panelBody, composer)
+  fill(els.panel, segmented, panelBody, effectLayer, composer)
   composer.hidden = room.tab !== "chat"
   renderPanelBody()
 }
@@ -1071,11 +1117,16 @@ async function boot() {
           room.viewers = event.viewers
           room.messages = event.history ?? []
           room.stickers = event.stickers ?? []
+          room.commands = event.commands ?? []
           if (event.audio) room.audio = event.audio
           renderTopbar()
           renderPanel()
           // Someone opened the browser before we arrived: join it.
           if (event.session) join(event.session)
+          break
+
+        case "effect":
+          playEffect(event)
           break
 
         case "audio":
