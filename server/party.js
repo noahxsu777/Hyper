@@ -6,6 +6,7 @@
  * who is here, what they say, and when the virtual computer starts or stops.
  */
 
+import { randomBytes } from "node:crypto"
 import { WebSocketServer } from "ws"
 
 const HISTORY_LIMIT = 120
@@ -77,6 +78,32 @@ export function createParty(server, { path = "/ws", getSession } = {}) {
    */
   const audio = { volume: 100, muted: false }
 
+  /**
+   * Whoever opens the room owns it: they choose what is on and everyone else
+   * watches. Ownership is a capability, not a checkbox — the owner is handed a
+   * secret the HTTP routes demand before they will start or stop the browser,
+   * so hiding the buttons is not the only thing standing in the way.
+   */
+  let owner = null
+  let ownerToken = null
+
+  function claimOwnership(viewer) {
+    owner = viewer
+    ownerToken = randomBytes(24).toString("base64url")
+    send(viewer.socket, { type: "owner", you: true, token: ownerToken, ownerId: viewer.id })
+  }
+
+  /** The room should never be left without someone able to put a film on. */
+  function passOwnership() {
+    const next = [...viewers.values()].sort((a, b) => a.joinedAt - b.joinedAt)[0]
+    owner = null
+    ownerToken = null
+    if (!next) return
+    claimOwnership(next)
+    system(`${next.name} ahora lleva la sala`)
+    announcePresence()
+  }
+
   const clean = (value, limit) =>
     String(value ?? "")
       .replace(/[\u0000-\u001f\u007f]/g, " ")
@@ -101,7 +128,7 @@ export function createParty(server, { path = "/ws", getSession } = {}) {
   }
 
   function announcePresence() {
-    broadcast({ type: "presence", viewers: roster() })
+    broadcast({ type: "presence", viewers: roster(), ownerId: owner?.id ?? null })
   }
 
   /** Post a system line ("X se ha unido") into the chat. */
@@ -128,14 +155,16 @@ export function createParty(server, { path = "/ws", getSession } = {}) {
 
       if (payload.type === "join") {
         const name = clean(payload.name, NAME_LIMIT) || `Invitado ${nextId}`
-        const viewer = { id: `v${nextId++}`, name, joinedAt: Date.now() }
+        const viewer = { id: `v${nextId++}`, name, joinedAt: Date.now(), socket }
         viewers.set(socket, viewer)
+        if (!owner) claimOwnership(viewer)
 
         send(socket, {
           type: "welcome",
           you: { id: viewer.id, name: viewer.name },
           viewers: roster(),
           history,
+          ownerId: owner?.id ?? null,
           stickers: STICKERS,
           commands: COMMANDS.map(({ command, label }) => ({ command, label })),
           audio,
@@ -200,6 +229,7 @@ export function createParty(server, { path = "/ws", getSession } = {}) {
       }
 
       if (payload.type === "audio") {
+        if (owner?.id !== viewer.id) return
         // Only the viewer who moved the control drives the remote player; the
         // rest just follow, otherwise every client would send its own key
         // presses and the volume would move several times over.
@@ -228,6 +258,7 @@ export function createParty(server, { path = "/ws", getSession } = {}) {
       if (!viewer) return
       announcePresence()
       system(`${viewer.name} ha salido`)
+      if (owner?.id === viewer.id) passOwnership()
     })
   })
 
@@ -256,6 +287,13 @@ export function createParty(server, { path = "/ws", getSession } = {}) {
     },
     get size() {
       return viewers.size
+    },
+    /** The HTTP routes ask this before starting or stopping the browser. */
+    isOwner(token) {
+      return Boolean(ownerToken) && token === ownerToken
+    },
+    get hasOwner() {
+      return Boolean(owner)
     },
     close() {
       clearInterval(heartbeat)

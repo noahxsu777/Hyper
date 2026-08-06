@@ -77,6 +77,8 @@ app.get("/api/config", (_req, res) => {
     height: hyperbeam?.height ?? null,
     roomName: process.env.ROOM_NAME || "Sala de cine",
     userAgent: hyperbeam?.userAgent ?? null,
+    // Which one the running session actually got, after any fallback.
+    activeUserAgent: hyperbeam?.activeUserAgent ?? null,
   })
 })
 
@@ -85,9 +87,18 @@ app.get("/api/session", (_req, res) => {
   res.json(publicSession(current))
 })
 
+/** The room's owner is the only one who can put something on, or take it off. */
+function requireOwner(req, res) {
+  const token = req.get("x-owner-token") || req.body?.ownerToken
+  if (party.isOwner(token)) return true
+  res.status(403).json({ error: "Solo quien lleva la sala puede hacer esto." })
+  return false
+}
+
 /** Open the shared browser, or join the one already running. */
 app.post("/api/session", async (req, res, next) => {
   if (!hyperbeam) return res.status(500).json({ error: configError })
+  if (!requireOwner(req, res)) return
   try {
     if (current && !req.body?.fresh) return res.json(publicSession(current))
     if (current && req.body?.fresh) await terminate()
@@ -110,7 +121,8 @@ app.post("/api/session", async (req, res, next) => {
   }
 })
 
-app.delete("/api/session", async (_req, res, next) => {
+app.delete("/api/session", async (req, res, next) => {
+  if (!requireOwner(req, res)) return
   try {
     const had = Boolean(current)
     await terminate()

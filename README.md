@@ -76,12 +76,37 @@ watch party, una máquina sobra.
 
 ---
 
+## Anfitrión e invitados
+
+Quien entra primero **lleva la sala**. Es quien elige qué se ve: abre el
+navegador, escribe direcciones, controla la reproducción y el volumen de todos.
+El resto son **invitados**: ven la misma pantalla y hablan por el chat, pero no
+tocan la película.
+
+No es solo que se les escondan los botones. El servidor le entrega al anfitrión
+un secreto al entrar, y las rutas que abren o cierran el navegador lo exigen: un
+invitado que llame a la API a mano recibe un 403. Además su cliente arranca con
+`disableInput`, así que sus clics y teclas ni siquiera salen hacia el navegador
+compartido.
+
+Si el anfitrión se va, la sala pasa a quien lleve más tiempo dentro, en vez de
+quedarse sin nadie que pueda poner nada.
+
+> Lo que **no** está blindado: un invitado con las herramientas de desarrollo
+> abiertas podría devolverse el control local sobre el vídeo. Bloquearlo de
+> verdad requiere la API de permisos de Hyperbeam con el `admin_token` en el
+> navegador del anfitrión, y este proyecto no ha podido probarla. Para ver una
+> película con amigos, lo que hay sobra.
+
+---
+
 ## Cómo se usa
 
 1. Entras, pones tu nombre y ya estás en la sala.
-2. Alguien pulsa **Abrir el navegador compartido**. A todos los demás se les
+2. El anfitrión pulsa **Abrir el navegador compartido**. A todos los demás se les
    conecta solo: no hay que darle a nada.
-3. Pones una película desde los accesos directos o escribiendo la dirección.
+3. El anfitrión pone una película desde los accesos directos o escribiendo la
+   dirección.
 4. La barra de abajo controla la reproducción para toda la sala, porque manda
    las teclas al navegador remoto:
 
@@ -121,11 +146,19 @@ watch party, una máquina sobra.
 tuyo. Se envía como `user_agent` en la llamada que crea la sesión, así que las
 webs ven ese navegador cuando les pide la película.
 
-Hyperbeam solo documenta un preset, `chrome_android`, que sirve para que las
-webs den su versión móvil. **No hay preset de iPad.** Una cadena propia se pasa
-tal cual y decide su API; este proyecto no ha podido comprobar si la acepta, así
-que si la rechaza el servidor reintenta con el agente por defecto en vez de
-dejar la sala sin poder abrir. Lo verás en ⚙ y en los logs.
+Hyperbeam solo documenta un preset, `chrome_android`. **No hay preset de iPad**
+—aunque la cadena de un iPad en modo escritorio es exactamente la de un Safari
+de Mac, que es la que viene puesta—. Una cadena propia se pasa tal cual y decide
+su API.
+
+Como no se puede comprobar desde aquí si la acepta, el servidor prueba en orden:
+
+1. la tuya (`HB_USER_AGENT`),
+2. `chrome_android`, el preset que sí existe,
+3. el agente por defecto.
+
+Un user agent rechazado cuesta un diseño, nunca la película. En ⚙ verás cuál
+acabó usando, y si tuvo que caer al siguiente te lo dice.
 
 Para confirmar cuál se está usando de verdad, abre el navegador compartido en
 `whatismybrowser.com/detect/what-is-my-user-agent`.

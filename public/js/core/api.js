@@ -1,8 +1,17 @@
 /** Client for our own backend, which brokers the Hyperbeam REST API. */
 
+/** Proof that we are the room's owner, handed over the socket on join. */
+let ownerToken = null
+export const setOwnerToken = (token) => {
+  ownerToken = token
+}
+
 async function request(path, options = {}) {
   const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(ownerToken ? { "x-owner-token": ownerToken } : {}),
+    },
     ...options,
     body: options.body ? JSON.stringify(options.body) : undefined,
   })

@@ -101,27 +101,32 @@ export class HyperbeamClient {
 
     if (!this.userAgent) return this.#request("/vm", { method: "POST", body })
 
-    try {
-      // Hyperbeam documents one preset, `chrome_android`. Whether it also takes
-      // a raw UA string is not something this project can verify, so the value
-      // is passed straight through and the API decides.
-      return await this.#request("/vm", {
-        method: "POST",
-        body: { ...body, user_agent: this.userAgent },
-      })
-    } catch (err) {
-      // A rejected user agent must not cost anyone their film night: fall back
-      // to the default browser rather than leaving the room unable to open.
-      if (err instanceof HyperbeamError && err.status >= 400 && err.status < 500) {
-        console.warn(
-          `[hyperbeam] user_agent rechazado (${err.message}). ` +
-            "Abriendo la sesión con el agente por defecto.",
-        )
-        this.userAgentRejected = true
-        return this.#request("/vm", { method: "POST", body })
+    // Hyperbeam documents one preset, `chrome_android`. Whether it also takes a
+    // raw UA string is not something this project can verify, so we try what
+    // was asked for, then the preset that is known to exist, then the default.
+    // A rejected user agent should cost a layout, never the film.
+    const attempts = [this.userAgent]
+    if (this.userAgent !== "chrome_android") attempts.push("chrome_android")
+
+    for (const agent of attempts) {
+      try {
+        const session = await this.#request("/vm", {
+          method: "POST",
+          body: { ...body, user_agent: agent },
+        })
+        this.activeUserAgent = agent
+        return session
+      } catch (err) {
+        const rejected =
+          err instanceof HyperbeamError && err.status >= 400 && err.status < 500
+        if (!rejected) throw err
+        console.warn(`[hyperbeam] user_agent "${agent}" rechazado: ${err.message}`)
       }
-      throw err
     }
+
+    console.warn("[hyperbeam] Abriendo la sesión con el agente por defecto.")
+    this.activeUserAgent = null
+    return this.#request("/vm", { method: "POST", body })
   }
 
   /** Fetch the current state of a session. */

@@ -9,7 +9,7 @@
 
 import { $, clamp, fill, h } from "./core/dom.js"
 import { icon } from "./core/icons.js"
-import { api, prettyHost, toUrl } from "./core/api.js"
+import { api, prettyHost, setOwnerToken, toUrl } from "./core/api.js"
 import { connectParty } from "./core/party.js"
 import { colourFor, initialsFor, set, state } from "./core/store.js"
 
@@ -61,6 +61,9 @@ const room = {
   stickers: [],
   /** Chat commands the server understands, delivered on join. */
   commands: [],
+  /** Who runs the room, and whether that is us. */
+  ownerId: null,
+  isOwner: false,
   /** The film's own volume, shared by the whole room. */
   audio: { volume: 100, muted: false },
 }
@@ -145,6 +148,10 @@ function renderTopbar() {
         null,
         h("span.dot", { dataset: { live } }),
         h("span", { text: `${statusText} · ${count} ${count === 1 ? "persona" : "personas"}` }),
+        h("span.tag", {
+          dataset: { tone: room.isOwner ? "ok" : "" },
+          text: room.isOwner ? "Anfitrión" : "Invitado",
+        }),
       ),
     ),
     h("div.faces", null, ...faces),
@@ -213,6 +220,24 @@ function servicesGrid() {
 
 function showIdle(note) {
   const configured = room.config?.configured
+
+  // A guest has nothing to press here: the room's owner decides what goes on.
+  if (!room.isOwner) {
+    const ownerName = room.viewers.find((viewer) => viewer.id === room.ownerId)?.name
+    showOverlay([
+      h("h1.overlay__title", { text: "Esperando a que empiece" }),
+      h("p.overlay__note", {
+        text: note
+          ? note
+          : ownerName
+            ? `${ownerName} lleva la sala. En cuanto ponga algo, lo verás aquí.`
+            : "En cuanto alguien ponga algo, lo verás aquí.",
+      }),
+      h("div.spinner"),
+    ])
+    return
+  }
+
   showOverlay([
     h("h1.overlay__title", { text: "¿Qué vemos hoy?" }),
     h("p.overlay__note", {
@@ -233,7 +258,7 @@ function showIdle(note) {
           text: room.config?.error ?? "Falta la clave HYPERBEAM_API_KEY en el servidor.",
         })
       : null,
-    configured ? servicesGrid() : null,
+    configured && room.isOwner ? servicesGrid() : null,
     configured
       ? h("p.overlay__note", {
           style: { fontSize: "12.5px" },
@@ -274,7 +299,7 @@ const addressInput = h("input", {
 
 /** Most players answer to the same keys, so this is our transport bar. */
 function tapKey(key) {
-  if (!room.hb) return
+  if (!room.hb || !room.isOwner) return
   room.hb.sendEvent({ type: "keydown", key })
   room.hb.sendEvent({ type: "keyup", key })
 }
@@ -380,12 +405,14 @@ function renderVolumePopover() {
     }),
     line({
       label: "Para toda la sala",
-      note: room.hb
-        ? "Cambia el volumen de la película para todos. Funciona en YouTube, Twitch y Vimeo."
-        : "Disponible cuando el navegador compartido esté abierto.",
+      note: !room.isOwner
+        ? "Solo quien lleva la sala puede cambiarlo."
+        : room.hb
+          ? "Cambia el volumen de la película para todos. Funciona en YouTube, Twitch y Vimeo."
+          : "Disponible cuando el navegador compartido esté abierto.",
       value: room.audio.volume,
       muted: room.audio.muted,
-      disabled: !room.hb,
+      disabled: !room.hb || !room.isOwner,
       onValue: (next) => {
         driveRoomVolume(next)
         room.audio.volume = next
@@ -419,9 +446,10 @@ function toggleVolume() {
 }
 
 function renderControls() {
-  // Anything that talks to the shared browser is dead until one is attached;
-  // the bar itself stays put so the volume is reachable from the first second.
-  const live = Boolean(room.hb)
+  // Anything that drives the shared browser needs both a browser to drive and
+  // the right to drive it. The bar itself stays put either way, so a guest can
+  // still reach their own volume, theatre mode and fullscreen.
+  const live = Boolean(room.hb) && room.isOwner
 
   const ctrl = (glyph, label, onClick, options = {}) =>
     h("button.ctrl", {
@@ -450,12 +478,16 @@ function renderControls() {
       }),
       ctrl("forward", "Avanzar", () => tapKey("ArrowRight"), { title: "Avanzar (→)" }),
     ),
-    h(
-      "div.address",
-      null,
-      h("span", { html: icon("search", { size: 15 }) }),
-      addressInput,
-    ),
+    room.isOwner
+      ? h(
+          "div.address",
+          null,
+          h("span", { html: icon("search", { size: 15 }) }),
+          addressInput,
+        )
+      : h("div.address.address--readonly", null, h("span", {
+          text: room.hb ? prettyHost(room.currentUrl) : "Esperando a la sala…",
+        })),
     h(
       "div.controls__group",
       null,
@@ -699,6 +731,9 @@ function renderPanelBody() {
             style: { background: colourFor(viewer.id + viewer.name) },
           }),
           h("span.person__name", { text: viewer.name }),
+          viewer.id === room.ownerId
+            ? h("span.tag", { dataset: { tone: "ok" }, text: "ANFITRIÓN" })
+            : null,
           viewer.id === room.you?.id ? h("span.tag", { dataset: { tone: "accent" }, text: "TÚ" }) : null,
         ),
       ),
@@ -840,6 +875,9 @@ async function attach(Hyperbeam, session) {
       }),
   })
 
+  // A guest watches: their clicks and keys never reach the shared browser.
+  room.hb.disableInput = !room.isOwner
+
   room.starting = false
   els.overlay.hidden = true
   renderTopbar()
@@ -939,13 +977,23 @@ async function openSettings() {
 
     // A user agent is only meaningful once you can see which one went out, so
     // it is shown here rather than left to the server logs.
-    const agent = config?.userAgent
+    const agent = config?.activeUserAgent ?? config?.userAgent
+    const fellBack =
+      config?.activeUserAgent && config?.userAgent && config.activeUserAgent !== config.userAgent
     const rows = [
       ["Navegador compartido", session ? "En marcha" : "Detenido"],
       ["Clave de API", config?.configured ? (config.testKey ? "De prueba" : "Activa") : "Sin configurar"],
       ["Resolución", config?.width ? `${config.width}×${config.height}` : "—"],
-      ["User agent", agent ? agent : "Por defecto (Chrome de escritorio)"],
+      [
+        "User agent",
+        agent
+          ? fellBack
+            ? `${agent} (el tuyo fue rechazado)`
+            : agent
+          : "Por defecto (Chrome de escritorio)",
+      ],
       ["Personas en la sala", String(room.viewers.length)],
+      ["Tu papel", room.isOwner ? "Anfitrión — mandas tú" : "Invitado — solo ves"],
     ]
 
     return [
@@ -977,7 +1025,7 @@ async function openSettings() {
             text: "La clave de prueba tiene minutos limitados: cierra el navegador al terminar.",
           })
         : null,
-      session
+      session && room.isOwner
         ? h("button.btn", {
             type: "button",
             dataset: { tone: "destructive" },
@@ -1048,7 +1096,7 @@ for (const type of ["keydown", "keyup"]) {
   window.addEventListener(
     type,
     (event) => {
-      if (!room.hb || isTyping() || event.metaKey || event.ctrlKey || event.altKey) return
+      if (!room.hb || !room.isOwner || isTyping() || event.metaKey || event.ctrlKey || event.altKey) return
       // The film gets the key; the page should not also scroll.
       if ([" ", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
         event.preventDefault()
@@ -1112,17 +1160,33 @@ async function boot() {
           renderTopbar()
           break
 
+        case "owner":
+          // Only the owner is ever handed this; it is what the HTTP routes ask for.
+          setOwnerToken(event.token)
+          room.ownerId = event.ownerId
+          room.isOwner = true
+          if (room.hb) room.hb.disableInput = false
+          renderTopbar()
+          renderControls()
+          renderPanel()
+          if (!room.hb) showIdle()
+          break
+
         case "welcome":
           room.you = event.you
           room.viewers = event.viewers
           room.messages = event.history ?? []
           room.stickers = event.stickers ?? []
           room.commands = event.commands ?? []
+          room.ownerId = event.ownerId ?? null
+          room.isOwner = room.ownerId === event.you?.id
           if (event.audio) room.audio = event.audio
           renderTopbar()
+          renderControls()
           renderPanel()
           // Someone opened the browser before we arrived: join it.
           if (event.session) join(event.session)
+          else showIdle()
           break
 
         case "effect":
@@ -1144,8 +1208,13 @@ async function boot() {
 
         case "presence":
           room.viewers = event.viewers
+          room.ownerId = event.ownerId ?? room.ownerId
+          room.isOwner = Boolean(room.you && room.ownerId === room.you.id)
+          if (room.hb) room.hb.disableInput = !room.isOwner
           renderTopbar()
+          renderControls()
           renderPanel()
+          if (!room.hb && !room.starting) showIdle()
           break
 
         case "chat":

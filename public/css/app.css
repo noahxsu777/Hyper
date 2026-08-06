@@ -1249,3 +1249,19 @@ body {
   backdrop-filter: var(--blur-thin);
   -webkit-backdrop-filter: var(--blur-thin);
 }
+
+/* A guest sees where the room is, but cannot type a new address. */
+.address--readonly {
+  color: var(--label-2);
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 13px;
+}
+
+/* The host/guest badge sits inline with the room status. */
+.topbar__sub .tag {
+  padding: 1px 7px;
+  font-size: 10.5px;
+}
