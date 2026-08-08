@@ -34,6 +34,7 @@ navegador compartido. La app arranca aunque no haya clave: te dirá qué falta.
 | `HB_START_URL` | `https://www.google.com` | Página inicial. |
 | `HB_USER_AGENT` | (vacío) | User agent del navegador virtual. Vacío = Chrome de escritorio. |
 | `HB_OFFLINE_TIMEOUT` | `60` | Segundos sin nadie conectado antes de que la máquina se apague sola. |
+| `GIPHY_API_KEY` | — | Clave de [developers.giphy.com](https://developers.giphy.com). Sin ella el botón de GIFs explica qué falta. |
 | `ROOM_NAME` | `Sala de cine` | Nombre que aparece arriba. |
 | `ROOM_OWNER_GRACE_MS` | `180000` | Cuánto espera la sala a un anfitrión desconectado antes de pasar el mando. |
 | `ROOM_EMPTY_TTL_MS` | `120000` | Cuánto sobrevive una sala vacía antes de cerrarse y apagar su navegador. |
@@ -46,6 +47,7 @@ navegador compartido. La app arranca aunque no haya clave: te dirá qué falta.
 
 ```bash
 fly secrets set HYPERBEAM_API_KEY=sk_test_...   # la clave nunca va en el repo
+fly secrets set GIPHY_API_KEY=...               # para el botón de GIFs
 fly scale count 1                               # ⚠️ obligatorio, ver abajo
 fly deploy
 ```
@@ -177,6 +179,11 @@ vez de quedarse bloqueado esperando a alguien que no va a volver.
 8. El botón 🙂 del chat abre los **stickers**. El catálogo lo define el servidor
    y solo acepta identificadores de esa lista, así que nadie puede colar
    contenido propio en el chat de los demás.
+9. Al lado, el botón **GIF** busca en GIPHY. La búsqueda va contra
+   `/api/gifs`, que es nuestro servidor: la clave de GIPHY se queda ahí y nunca
+   llega al navegador. Al enviar, la sala solo acepta URLs de `giphy.com`, así
+   que ese endpoint no sirve para meter imágenes de cualquier sitio en el chat
+   ajeno.
 
 ### El user agent del navegador compartido
 
@@ -249,6 +256,7 @@ navegador  ◀────{ embedUrl }─────  servidor  ◀──{ sess
 server/
   index.js       Express: estáticos, /api/config, /api/rooms/:code/session
   hyperbeam.js   Cliente REST de Hyperbeam
+  giphy.js       Búsqueda de GIFs, para que la clave no salga del servidor
   rooms.js       Salas: presencia, chat, roles, moderación y WebSocket
 public/
   css/           reset · tokens (colores, materiales, muelles) · app

@@ -594,7 +594,7 @@ const composerSend = h("button.composer__send", {
 
 const stickerPicker = h("div.popover.popover--stickers", { hidden: true })
 
-const stickerButton = h("button.composer__sticker", {
+const stickerButton = h("button.composer__chip.composer__sticker", {
   type: "button",
   "aria-label": "Stickers",
   text: "🙂",
@@ -641,7 +641,109 @@ function renderStickerPicker() {
   )
 }
 
+/* ---- GIFs ---------------------------------------------------------------- */
+
+const gifPicker = h("div.popover.popover--gifs", { hidden: true })
+const gifGrid = h("div.gif-grid")
+const gifSearch = h("input.field.field--search", {
+  type: "search",
+  placeholder: "Buscar un GIF",
+  autocomplete: "off",
+})
+
+let gifQuery = ""
+let gifRequest = 0
+
+async function loadGifs(query) {
+  const ticket = ++gifRequest
+  fill(gifGrid, h("div.gif-grid__note", null, h("div.spinner"), h("span", { text: "Buscando…" })))
+  try {
+    const { gifs } = await api.gifs(query)
+    // A slower earlier search must not overwrite a newer one.
+    if (ticket !== gifRequest) return
+    if (!gifs.length) {
+      fill(gifGrid, h("div.gif-grid__note", { text: "Nada por aquí. Prueba con otra palabra." }))
+      return
+    }
+    fill(
+      gifGrid,
+      ...gifs.map((gif) =>
+        h("button", {
+          type: "button",
+          "aria-label": gif.title,
+          title: gif.title,
+          // Reserve the right shape so the grid does not jump as they load.
+          style: { aspectRatio: `${gif.width} / ${gif.height}` },
+          onClick: () => {
+            room.socket?.gif(gif)
+            closeGifs()
+          },
+        },
+        h("img", { src: gif.url, alt: "", loading: "lazy" })),
+      ),
+    )
+  } catch (error) {
+    if (ticket !== gifRequest) return
+    fill(gifGrid, h("div.gif-grid__note", { text: error.message }))
+  }
+}
+
+let gifDebounce = null
+gifSearch.addEventListener("input", () => {
+  const value = gifSearch.value.trim()
+  clearTimeout(gifDebounce)
+  gifDebounce = setTimeout(() => {
+    gifQuery = value
+    loadGifs(gifQuery)
+  }, 350)
+})
+
+fill(
+  gifPicker,
+  h(
+    "div.popover__head",
+    null,
+    h("span", { text: "GIFs" }),
+    h("button.popover__close", {
+      type: "button",
+      "aria-label": "Cerrar",
+      html: icon("x", { size: 15 }),
+      onClick: () => closeGifs(),
+    }),
+  ),
+  gifSearch,
+  gifGrid,
+  // GIPHY asks for this wherever their results are shown.
+  h("p.gif-grid__credit", { text: "Powered by GIPHY" }),
+)
+
+const gifButton = h("button.composer__chip.composer__gif", {
+  type: "button",
+  "aria-label": "GIFs",
+  text: "GIF",
+  onClick: () => toggleGifs(),
+})
+
+function openGifs() {
+  closeStickers()
+  gifPicker.hidden = false
+  gifButton.dataset.on = "true"
+  loadGifs(gifQuery)
+  setTimeout(() => gifSearch.focus({ preventScroll: true }), 80)
+}
+
+function closeGifs() {
+  gifPicker.hidden = true
+  delete gifButton.dataset.on
+}
+
+function toggleGifs() {
+  if (gifPicker.hidden) openGifs()
+  else closeGifs()
+}
+
 function openStickers() {
+  closeGifs()
   renderStickerPicker()
   stickerPicker.hidden = false
   stickerButton.dataset.on = "true"
@@ -733,7 +835,9 @@ const composer = h(
   "div.composer",
   null,
   stickerPicker,
+  gifPicker,
   stickerButton,
+  gifButton,
   composerField,
   composerSend,
 )
@@ -867,7 +971,15 @@ function renderPanelBody() {
           ),
           message.kind === "sticker"
             ? h("div.msg__sticker", { text: message.char })
-            : h("div.msg__text", { text: message.text }),
+            : message.kind === "gif"
+              ? h("img.msg__gif", {
+                  src: message.url,
+                  alt: "GIF",
+                  loading: "lazy",
+                  width: message.width,
+                  height: message.height,
+                })
+              : h("div.msg__text", { text: message.text }),
         ),
       )
     }),
@@ -1385,12 +1497,16 @@ document.addEventListener("pointerdown", (event) => {
   if (!stickerPicker.hidden && !stickerPicker.contains(event.target)) {
     if (!event.target.closest?.(".composer__sticker")) closeStickers()
   }
+  if (!gifPicker.hidden && !gifPicker.contains(event.target)) {
+    if (!event.target.closest?.(".composer__gif")) closeGifs()
+  }
 })
 
 window.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return
   if (!volumePopover.hidden) closeVolume()
   if (!stickerPicker.hidden) closeStickers()
+  if (!gifPicker.hidden) closeGifs()
 })
 
 /* --------------------------------------------------------------------------

@@ -50,6 +50,7 @@ export function connectParty({ code, name, clientId, onEvent }) {
   return {
     chat: (text) => send({ type: "chat", text }),
     sticker: (id) => send({ type: "sticker", id }),
+    gif: (gif) => send({ type: "gif", url: gif.url, width: gif.width, height: gif.height }),
     audio: (patch) => send({ type: "audio", ...patch }),
     setRole: (targetId, role) => send({ type: "role", targetId, role }),
     kick: (targetId) => send({ type: "kick", targetId }),

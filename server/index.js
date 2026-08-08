@@ -4,6 +4,7 @@ import express from "express"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { HyperbeamClient, HyperbeamError } from "./hyperbeam.js"
+import { GiphyClient } from "./giphy.js"
 import { createRoomHub } from "./rooms.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -46,6 +47,9 @@ try {
  */
 const MAX_ROOMS = Number(process.env.MAX_ROOMS) || 25
 
+/** GIFs are proxied so the key never reaches the browser. */
+const giphy = new GiphyClient(process.env.GIPHY_API_KEY)
+
 const app = express()
 app.use(express.json())
 app.disable("x-powered-by")
@@ -71,7 +75,21 @@ app.get("/api/config", (_req, res) => {
     activeUserAgent: hyperbeam?.activeUserAgent ?? null,
     rooms: hub.size,
     maxRooms: MAX_ROOMS,
+    giphy: giphy.configured,
   })
+})
+
+/* ------------------------------------------------------------------ giphy */
+
+app.get("/api/gifs", async (req, res, next) => {
+  const query = String(req.query.q ?? "").trim().slice(0, 80)
+  const offset = Math.min(500, Math.max(0, Number(req.query.offset) || 0))
+  try {
+    const gifs = query ? await giphy.search(query, offset) : await giphy.trending(offset)
+    res.json({ gifs })
+  } catch (err) {
+    next(err)
+  }
 })
 
 /* ----------------------------------------------------------------- rooms */
@@ -186,6 +204,10 @@ app.get(/^\/(?!api\/|vendor\/).*/, (_req, res) => {
 })
 
 app.use((err, _req, res, _next) => {
+  if (err?.name === "GiphyError") {
+    console.error(`[giphy] ${err.message}`)
+    return res.status(err.status ?? 502).json({ error: err.message })
+  }
   if (err instanceof HyperbeamError) {
     console.error(`[hyperbeam] ${err.message}`)
     return res.status(err.status).json({ error: err.message, details: err.body })

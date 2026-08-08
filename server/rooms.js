@@ -14,6 +14,8 @@
 import { randomBytes } from "node:crypto"
 import { WebSocketServer } from "ws"
 
+import { isGiphyUrl } from "./giphy.js"
+
 const HISTORY_LIMIT = 120
 const NAME_LIMIT = 24
 const TEXT_LIMIT = 800
@@ -68,7 +70,7 @@ export const COMMANDS = [
     effect: "drag",
     label: "dragonite",
     kind: "image",
-    url: "https://www.wikidex.net/wiki/Archivo:Dragonite.png",
+    url: "https://images.wikidexcdn.net/mwuploads/wikidex/a/a6/latest/20230518040921/Dragonite.png",
     duration: 5000,
   },
 ]
@@ -401,6 +403,20 @@ class Room {
           return
         }
         this.post({ ...this.entry(viewer), text, kind: "chat" })
+        return
+      }
+
+      case "gif": {
+        // The client picked this from our own proxy, but it is still a URL
+        // arriving over a socket: only GIPHY's own hosts get into the chat.
+        if (!isGiphyUrl(payload.url)) return
+        this.post({
+          ...this.entry(viewer),
+          url: String(payload.url),
+          width: Math.min(600, Math.max(1, Number(payload.width) || 200)),
+          height: Math.min(600, Math.max(1, Number(payload.height) || 200)),
+          kind: "gif",
+        })
         return
       }
 

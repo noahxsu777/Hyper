@@ -33,6 +33,10 @@ export const api = {
   /** Backend + key status, safe to show in the room settings. */
   config: () => request("/api/config"),
 
+  /** GIFs, proxied so the GIPHY key stays on the server. */
+  gifs: (query = "", offset = 0) =>
+    request(`/api/gifs?q=${encodeURIComponent(query)}&offset=${offset}`),
+
   /** Open a new room; resolves to its code. */
   createRoom: () => request("/api/rooms", { method: "POST" }),
 
