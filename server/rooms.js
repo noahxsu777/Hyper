@@ -89,12 +89,14 @@ const secret = () => randomBytes(24).toString("base64url")
  * One party.
  */
 class Room {
-  constructor(code, { ownerGraceMs, emptyTtlMs, onEmpty }) {
+  constructor(code, { ownerGraceMs, emptyTtlMs, idleSessionMs, onEmpty, onIdleSession }) {
     this.code = code
     this.createdAt = Date.now()
     this.ownerGraceMs = ownerGraceMs
     this.emptyTtlMs = emptyTtlMs
+    this.idleSessionMs = idleSessionMs
     this.onEmpty = onEmpty
+    this.onIdleSession = onIdleSession
 
     /** @type {Map<import("ws").WebSocket, object>} */
     this.viewers = new Map()
@@ -115,6 +117,7 @@ class Room {
 
     this.handoverTimer = null
     this.emptyTimer = null
+    this.idleSessionTimer = null
     this.goodbyes = new Map()
   }
 
@@ -248,6 +251,8 @@ class Room {
 
     clearTimeout(this.emptyTimer)
     this.emptyTimer = null
+    clearTimeout(this.idleSessionTimer)
+    this.idleSessionTimer = null
 
     const goodbye = this.goodbyes.get(clientId)
     if (goodbye) {
@@ -293,10 +298,26 @@ class Room {
     this.goodbyes.set(viewer.clientId, goodbye)
 
     if (this.viewers.size === 0) {
-      // Nobody is waiting for this room any more; let it go, and with it the
-      // virtual computer it was paying for.
-      clearTimeout(this.handoverTimer)
-      this.handoverTimer = null
+      // Ojo con no cancelar el relevo aquí. Una sala vacía conserva a su
+      // anfitrión durante la gracia —para eso está—, pero si el reloj se para,
+      // lo conserva para siempre: el siguiente que entre se encuentra una sala
+      // con un dueño que no está, sin poder abrir nada. Al vencer la gracia sin
+      // nadie dentro, `scheduleHandover` deja la sala libre para quien llegue.
+      if (this.ownerClientId === viewer.clientId) this.scheduleHandover()
+
+      // Dos relojes distintos, porque cuestan cosas distintas.
+      //
+      // La máquina virtual cuesta dinero por minuto, así que se apaga pronto.
+      // La sala en sí es un objeto en memoria: no cuesta nada, y tirarla es lo
+      // que hacía que bloquear el móvil un par de minutos a media película
+      // dejara el código muerto y el chat perdido. Así que se recuerda mucho
+      // más tiempo, y quien vuelve encuentra su sala donde la dejó.
+      this.idleSessionTimer = setTimeout(() => {
+        this.idleSessionTimer = null
+        if (this.viewers.size === 0) this.onIdleSession?.(this)
+      }, this.idleSessionMs)
+      this.idleSessionTimer.unref?.()
+
       this.emptyTimer = setTimeout(() => this.onEmpty?.(this), this.emptyTtlMs)
       this.emptyTimer.unref?.()
       return
@@ -481,6 +502,7 @@ class Room {
   dispose() {
     clearTimeout(this.handoverTimer)
     clearTimeout(this.emptyTimer)
+    clearTimeout(this.idleSessionTimer)
     for (const timer of this.goodbyes.values()) clearTimeout(timer)
     this.goodbyes.clear()
     for (const socket of this.viewers.keys()) socket.close()
@@ -491,13 +513,21 @@ class Room {
 /**
  * The registry: creates rooms, routes sockets to them, and reaps the empty ones.
  */
-export function createRoomHub(server, { path = "/ws", ownerGraceMs, emptyTtlMs, onRoomClosed } = {}) {
+export function createRoomHub(
+  server,
+  { path = "/ws", ownerGraceMs, emptyTtlMs, idleSessionMs, onRoomClosed, onIdleSession } = {},
+) {
   const wss = new WebSocketServer({ server, path })
   /** @type {Map<string, Room>} */
   const rooms = new Map()
 
   const grace = ownerGraceMs ?? 3 * 60 * 1000
-  const ttl = emptyTtlMs ?? 2 * 60 * 1000
+  // Una sala vacía se recuerda un buen rato: un móvil bloqueado, un túnel o un
+  // ascensor no deberían borrar el código que la gente tiene compartido.
+  const ttl = emptyTtlMs ?? 15 * 60 * 1000
+  // La máquina virtual, en cambio, se apaga en cuanto está claro que nadie la
+  // está mirando. Es lo único de esto que cuesta minutos.
+  const idleSession = idleSessionMs ?? 90 * 1000
 
   function newCode() {
     for (let attempt = 0; attempt < 50; attempt++) {
@@ -517,11 +547,13 @@ export function createRoomHub(server, { path = "/ws", ownerGraceMs, emptyTtlMs, 
     const room = new Room(code, {
       ownerGraceMs: grace,
       emptyTtlMs: ttl,
+      idleSessionMs: idleSession,
       onEmpty: (finished) => {
         rooms.delete(finished.code)
         finished.dispose()
         onRoomClosed?.(finished)
       },
+      onIdleSession: (idle) => onIdleSession?.(idle),
     })
     rooms.set(code, room)
     return room

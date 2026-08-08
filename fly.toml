@@ -27,17 +27,28 @@ primary_region = 'ams'
   # 'chrome_android'; una cadena propia se pasa tal cual y decide su API. Si la
   # rechaza, el servidor reintenta con el agente por defecto en vez de fallar.
   HB_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15'
-  # Segundos sin nadie conectado antes de que Hyperbeam apague la máquina virtual.
-  HB_OFFLINE_TIMEOUT = '60'
+  # Segundos sin nadie conectado antes de que Hyperbeam apague la máquina
+  # virtual. Estaba en 60: bloquear el móvil un minuto mataba la película.
+  HB_OFFLINE_TIMEOUT = '300'
+  # Segundos sin que nadie toque el navegador compartido antes de que Hyperbeam
+  # lo apague. 0 lo desactiva, que es lo que hace falta aquí: ver una película
+  # es exactamente no tocar nada durante dos horas.
+  HB_INACTIVE_TIMEOUT = '0'
 
 [http_service]
   internal_port = 8080
   force_https = true
-  # Al parar, Fly manda SIGINT y el servidor termina la sesión de Hyperbeam
-  # antes de morir, para no seguir gastando minutos.
-  auto_stop_machines = 'stop'
+  # Las salas viven en la memoria de este proceso: el código, el chat, quién es
+  # el anfitrión y qué sesión de Hyperbeam está abierta. Si Fly para la máquina,
+  # todo eso desaparece, y el resultado es lo que se veía en la app: "la sala ya
+  # no existe" a media película, sólo porque durante un rato nadie tenía una
+  # conexión abierta (el móvil bloqueado, un túnel, un ascensor).
+  #
+  # Así que la máquina se queda encendida. Cuesta una máquina pequeña siempre
+  # activa; la alternativa es una sala que se puede evaporar mientras la usas.
+  auto_stop_machines = 'off'
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
   processes = ['app']
 
   # Los WebSocket son conexiones de larga duración, así que los límites van

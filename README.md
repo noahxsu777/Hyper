@@ -33,11 +33,14 @@ navegador compartido. La app arranca aunque no haya clave: te dirá qué falta.
 | `HB_WIDTH` / `HB_HEIGHT` | `1280` / `720` | Resolución del navegador. 16:9, que es como son las películas. |
 | `HB_START_URL` | `https://www.google.com` | Página inicial. |
 | `HB_USER_AGENT` | (vacío) | User agent del navegador virtual. Vacío = Chrome de escritorio. |
-| `HB_OFFLINE_TIMEOUT` | `60` | Segundos sin nadie conectado antes de que la máquina se apague sola. |
+| `HB_OFFLINE_TIMEOUT` | `300` | Segundos sin nadie conectado antes de que la máquina virtual se apague sola. |
+| `HB_INACTIVE_TIMEOUT` | `0` | Segundos sin que nadie **toque** el navegador compartido antes de apagarlo. `0` lo desactiva, que es lo que necesita una watch party. |
+| `HB_ABSOLUTE_TIMEOUT` | `21600` | Tope de vida de una sesión, en segundos. Seis horas, como red de seguridad. |
 | `GIPHY_API_KEY` | — | Clave de [developers.giphy.com](https://developers.giphy.com). Sin ella el botón de GIFs explica qué falta. |
 | `ROOM_NAME` | `Sala de cine` | Nombre que aparece arriba. |
 | `ROOM_OWNER_GRACE_MS` | `180000` | Cuánto espera la sala a un anfitrión desconectado antes de pasar el mando. |
-| `ROOM_EMPTY_TTL_MS` | `120000` | Cuánto sobrevive una sala vacía antes de cerrarse y apagar su navegador. |
+| `ROOM_EMPTY_TTL_MS` | `900000` | Cuánto sobrevive una sala vacía antes de olvidarse. Generoso: la sala es memoria y no cuesta nada. |
+| `ROOM_IDLE_SESSION_MS` | `90000` | Cuánto tarda una sala vacía en apagar su navegador virtual. Corto: esto sí cuesta minutos. |
 | `MAX_ROOMS` | `25` | Salas abiertas a la vez. Cada una puede gastar minutos de Hyperbeam. |
 | `PORT` | `3000` | Puerto del servidor. |
 
@@ -77,8 +80,9 @@ watch party, una máquina sobra.
   dispara el apagado de la sesión de Hyperbeam. Con `npm` en medio la señal no
   llega y el navegador virtual seguiría facturando.
 - Health check contra `/api/config`.
-- La máquina puede pararse sola cuando no hay nadie (`auto_stop_machines`) y
-  arranca de nuevo con la primera visita.
+- **La máquina no se para sola** (`auto_stop_machines = 'off'`,
+  `min_machines_running = 1`). Ver más abajo: es lo que hacía que una sala
+  "dejara de existir" a media película.
 
 ---
 
@@ -224,6 +228,33 @@ La sala lo trata como lo que es: al volver a primer plano le da un toque
 vuelve a montar desde la sesión que el servidor sigue teniendo. El aviso de
 "Reconectando…" lleva además un botón de **Reintentar**, para no dejarte mirando
 un spinner.
+
+### Por qué una sala ya no "caduca" viéndola
+
+Se cortaba a media película por tres motivos distintos, todos con la misma cara:
+
+1. **El reloj de inactividad de Hyperbeam.** Cuenta desde la última vez que
+   alguien tocó el ratón o el teclado *dentro* del navegador compartido. Ver una
+   película es exactamente eso: dos horas sin tocar nada. La sesión se cerraba
+   "por inactividad" con la sala entera mirándola. Ahora se pide
+   `timeout.inactive = 0`, que lo desactiva. Si la cuenta no acepta ese campo,
+   la sesión se abre igual sin él y el servidor lo dice en ⚙ (`timeoutsApplied`)
+   en vez de dar por hecho que se aplicó.
+2. **`offline_timeout` en 60 segundos.** Bloquear el móvil un minuto bastaba
+   para que Hyperbeam apagara la máquina. Ahora son 5 minutos.
+3. **Fly parando la máquina.** Las salas viven en la memoria del proceso: si Fly
+   la paraba por falta de tráfico, desaparecían todas, y al volver salía "la
+   sala ya no existe". `auto_stop_machines = 'off'` y `min_machines_running = 1`.
+
+Y una sala vacía ya no se tira a los 2 minutos. Ahora son dos relojes separados,
+porque cuestan cosas distintas: el **navegador virtual** se apaga a los 90
+segundos (es lo único que gasta minutos), y la **sala** —su código, su chat,
+quién la lleva— se recuerda 15 minutos. Un túnel o un ascensor ya no borran un
+código que la gente tiene compartido.
+
+Pasada la gracia del anfitrión con la sala vacía, la sala queda libre: quien
+entre después la lleva. Una sala que conserva a un dueño que no está es una sala
+que nadie puede arrancar.
 
 ### Sobre el DRM
 

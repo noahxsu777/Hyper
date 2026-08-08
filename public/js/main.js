@@ -1093,6 +1093,20 @@ function showStalled(text) {
 }
 
 /**
+ * The virtual computer is gone for good. Tell the server so it stops handing
+ * out a dead `embed_url` — otherwise everyone who tries to join, or comes back
+ * later, gets a session that will never connect.
+ *
+ * Only whoever runs the room may do this, which is also who found out.
+ */
+function forgetDeadSession() {
+  if (!canModerate() || !room.code) return
+  api.endSession(room.code).catch((err) => {
+    console.warn("[party] no se pudo limpiar la sesión terminada", err)
+  })
+}
+
+/**
  * Tear the stream down and build it again from the session the server still
  * has. Coming back to a backgrounded tab often leaves the WebRTC connection
  * beyond saving, and no amount of waiting brings it round.
@@ -1140,11 +1154,21 @@ async function attach(Hyperbeam, session) {
       room.hb = null
       renderTopbar()
       renderControls()
-      showIdle(
-        event?.type === "inactive"
-          ? "La sesión se cerró por inactividad."
-          : "Se ha cerrado la conexión con el navegador compartido.",
-      )
+
+      // "inactive" y "absolute" son la máquina virtual apagándose de verdad, no
+      // un corte de red. El servidor todavía guarda la sesión muerta, y si no
+      // se la quitamos, el siguiente intento se conecta a una URL que ya no
+      // lleva a ninguna parte y la sala se queda dando vueltas.
+      if (event?.type === "inactive" || event?.type === "absolute") {
+        forgetDeadSession()
+        showIdle(
+          event.type === "absolute"
+            ? "La sesión llegó a su duración máxima. Vuelve a abrirla para seguir."
+            : "El navegador compartido se cerró por inactividad.",
+        )
+        return
+      }
+      showIdle("Se ha cerrado la conexión con el navegador compartido.")
     },
     onConnectionStateChange: ({ state: connection }) => {
       room.connection = connection
@@ -1167,13 +1191,23 @@ async function attach(Hyperbeam, session) {
         stallTimer = setTimeout(reattach, 1500)
       }
     },
-    onCloseWarning: () =>
+    onCloseWarning: (event) => {
+      // Con el reloj de inactividad desactivado en el servidor esto ya no
+      // debería saltar a media película. Si salta, el aviso dice cuánto queda
+      // y qué hacer, en vez de limitarse a asustar.
+      const seconds = Math.round((event?.deadline?.delay ?? 0) / 1000)
+      const left = seconds > 90 ? `${Math.round(seconds / 60)} min` : `${seconds || "unos"} s`
       toast({
-        title: "La sala se va a cerrar",
-        text: "El navegador compartido se apagará por inactividad.",
+        title: "El navegador compartido se va a cerrar",
+        text:
+          event?.type === "absolute"
+            ? `Llega a su duración máxima en ${left}. Ábrelo otra vez para seguir viendo.`
+            : `Se cerrará en ${left} si nadie lo toca. Mueve el ratón sobre el vídeo para mantenerlo.`,
         glyph: "timer",
         color: "var(--orange)",
-      }),
+        duration: 8000,
+      })
+    },
   })
 
   // A guest watches: their clicks and keys never reach the shared browser.

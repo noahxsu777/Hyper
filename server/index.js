@@ -18,6 +18,9 @@ const config = {
   height: Number(process.env.HB_HEIGHT) || undefined,
   startUrl: process.env.HB_START_URL,
   offlineTimeout: process.env.HB_OFFLINE_TIMEOUT ? Number(process.env.HB_OFFLINE_TIMEOUT) : undefined,
+  // 0 desactiva el reloj de inactividad, que es lo que cortaba las películas.
+  inactiveTimeout: process.env.HB_INACTIVE_TIMEOUT ? Number(process.env.HB_INACTIVE_TIMEOUT) : undefined,
+  absoluteTimeout: process.env.HB_ABSOLUTE_TIMEOUT ? Number(process.env.HB_ABSOLUTE_TIMEOUT) : undefined,
   userAgent: process.env.HB_USER_AGENT,
 }
 
@@ -73,6 +76,10 @@ app.get("/api/config", (_req, res) => {
     height: hyperbeam?.height ?? null,
     userAgent: hyperbeam?.userAgent ?? null,
     activeUserAgent: hyperbeam?.activeUserAgent ?? null,
+    inactiveTimeout: hyperbeam?.inactiveTimeout ?? null,
+    // Null hasta la primera sesión: hasta entonces no sabemos si esta cuenta
+    // acepta configurar los relojes, y la sala no debería dar por hecho que sí.
+    timeoutsApplied: hyperbeam?.timeoutsApplied ?? null,
     rooms: hub.size,
     maxRooms: MAX_ROOMS,
     giphy: giphy.configured,
@@ -230,6 +237,12 @@ const server = app.listen(PORT, () => {
 const hub = createRoomHub(server, {
   ownerGraceMs: Number(process.env.ROOM_OWNER_GRACE_MS) || undefined,
   emptyTtlMs: Number(process.env.ROOM_EMPTY_TTL_MS) || undefined,
+  idleSessionMs: Number(process.env.ROOM_IDLE_SESSION_MS) || undefined,
+  // Nadie mirando: el navegador compartido se apaga aunque la sala siga
+  // existiendo. La sala es memoria; la máquina virtual son minutos.
+  onIdleSession: (room) => {
+    terminate(room).catch(() => {})
+  },
   // An abandoned room must not leave a virtual computer running behind it.
   onRoomClosed: (room) => {
     terminate(room).catch(() => {})

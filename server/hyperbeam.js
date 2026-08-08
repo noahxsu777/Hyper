@@ -13,7 +13,25 @@ const DEFAULTS = {
   width: 1280,
   height: 720,
   startUrl: "https://www.google.com",
-  offlineTimeout: 60,
+
+  /*
+   * Los relojes que apagan la máquina virtual. El importante es el de
+   * inactividad: Hyperbeam lo cuenta desde la última vez que alguien tocó el
+   * ratón o el teclado *dentro* del navegador compartido, y ver una película es
+   * justo eso, no tocar nada. Con el valor por defecto la sesión se cerraba a
+   * media película por "inactiva" mientras la sala entera la estaba mirando.
+   *
+   * Aquí va en 0, que lo desactiva: quien decide cuándo se acaba es la sala.
+   */
+  inactiveTimeout: 0,
+  // Segundos sin nadie conectado. 60 era poco: bloquear el móvil un minuto
+  // bastaba para matar la película.
+  offlineTimeout: 300,
+  // Tope absoluto, por si una sala queda colgada sin que nadie la cierre.
+  // Seis horas cubre cualquier película y evita que una máquina sangre minutos.
+  absoluteTimeout: 6 * 60 * 60,
+  // Cuánto antes del cierre avisa Hyperbeam, para que el aviso sirva de algo.
+  warningTimeout: 60,
 }
 
 export class HyperbeamError extends Error {
@@ -24,6 +42,14 @@ export class HyperbeamError extends Error {
     this.body = body
   }
 }
+
+/**
+ * A 4xx is Hyperbeam saying "not like that": worth retrying with a smaller
+ * body. Anything else (network, 5xx) is not our body's fault, and swallowing it
+ * would hide a real outage behind a confusing fallback.
+ */
+const isRejection = (err) =>
+  err instanceof HyperbeamError && err.status >= 400 && err.status < 500
 
 export class HyperbeamClient {
   constructor(config = {}) {
@@ -39,9 +65,17 @@ export class HyperbeamClient {
     this.height = config.height || DEFAULTS.height
     this.startUrl = config.startUrl || DEFAULTS.startUrl
     this.offlineTimeout = config.offlineTimeout ?? DEFAULTS.offlineTimeout
+    this.inactiveTimeout = config.inactiveTimeout ?? DEFAULTS.inactiveTimeout
+    this.absoluteTimeout = config.absoluteTimeout ?? DEFAULTS.absoluteTimeout
+    this.warningTimeout = config.warningTimeout ?? DEFAULTS.warningTimeout
     // Left unset by default: `user_agent` is only sent when asked for, so an
     // unsupported value can never break a session nobody opted into.
     this.userAgent = config.userAgent || null
+
+    // Lo que la API acabó aceptando. Null hasta que se abre la primera sesión:
+    // no lo sabemos antes, y decir que sí sin haberlo pedido sería mentir.
+    this.activeUserAgent = null
+    this.timeoutsApplied = null
   }
 
   /** True when the configured key is a test key (limited minutes). */
@@ -92,19 +126,55 @@ export class HyperbeamClient {
    * Resolves to `{ session_id, embed_url, admin_token }`.
    */
   async createSession({ startUrl, width, height } = {}) {
-    const body = {
+    const base = {
       start_url: startUrl || this.startUrl,
       width: width || this.width,
       height: height || this.height,
+      // El campo suelto de siempre, por si esta cuenta aún habla la versión
+      // vieja de la API.
       offline_timeout: this.offlineTimeout,
     }
 
-    if (!this.userAgent) return this.#request("/vm", { method: "POST", body })
+    const timeouts = {
+      timeout: {
+        absolute: this.absoluteTimeout,
+        inactive: this.inactiveTimeout,
+        offline: this.offlineTimeout,
+        warning: this.warningTimeout,
+      },
+    }
 
-    // Hyperbeam documents one preset, `chrome_android`. Whether it also takes a
-    // raw UA string is not something this project can verify, so we try what
-    // was asked for, then the preset that is known to exist, then the default.
-    // A rejected user agent should cost a layout, never the film.
+    // Desactivar el reloj de inactividad es lo que salva la película, así que
+    // se intenta primero. Si esta cuenta no acepta el bloque `timeout`, la
+    // sesión se abre igual sin él: mejor una película que puede cortarse que
+    // ninguna. Lo que no hacemos es fingir que se aplicó.
+    try {
+      const session = await this.#createWithUserAgent({ ...base, ...timeouts })
+      this.timeoutsApplied = true
+      return session
+    } catch (err) {
+      if (!isRejection(err)) throw err
+      console.warn(`[hyperbeam] bloque timeout rechazado: ${err.message}`)
+      console.warn("[hyperbeam] La sesión puede cerrarse sola por inactividad.")
+    }
+
+    this.timeoutsApplied = false
+    return this.#createWithUserAgent(base)
+  }
+
+  /**
+   * Hyperbeam documents one preset, `chrome_android`. Whether it also takes a
+   * raw UA string is not something this project can verify, so we try what was
+   * asked for, then the preset that is known to exist, then the default. A
+   * rejected user agent should cost a layout, never the film.
+   */
+  async #createWithUserAgent(body) {
+    if (!this.userAgent) {
+      const session = await this.#request("/vm", { method: "POST", body })
+      this.activeUserAgent = null
+      return session
+    }
+
     const attempts = [this.userAgent]
     if (this.userAgent !== "chrome_android") attempts.push("chrome_android")
 
@@ -117,9 +187,7 @@ export class HyperbeamClient {
         this.activeUserAgent = agent
         return session
       } catch (err) {
-        const rejected =
-          err instanceof HyperbeamError && err.status >= 400 && err.status < 500
-        if (!rejected) throw err
+        if (!isRejection(err)) throw err
         console.warn(`[hyperbeam] user_agent "${agent}" rechazado: ${err.message}`)
       }
     }
