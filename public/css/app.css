@@ -41,7 +41,9 @@ body {
 @media (max-width: 900px) {
   .app {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto 1fr;
+    /* minmax(0, 1fr): the panel yields to a taller screen instead of forcing
+       the grid to overflow — its own lists scroll inside it. */
+    grid-template-rows: auto auto minmax(0, 1fr);
     grid-template-areas:
       "topbar"
       "stage"
@@ -2434,5 +2436,54 @@ body {
 @media (max-width: 640px) {
   .ytsearch__grid {
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  }
+}
+
+/* An app owns the screen: the shared-browser controls (transport keys, the
+   address, reload) drive nothing, so they yield their space to the picture. */
+
+.controls[data-app="true"] .controls__group:first-of-type,
+.controls[data-app="true"] .address,
+.controls[data-app="true"] .ctrl[aria-label="Recargar"] {
+  display: none;
+}
+
+/* On a phone, a screen with something actually on it deserves real height;
+   the waiting screen keeps the compact card. */
+@media (max-width: 900px) {
+  .app[data-live="true"] .screen {
+    aspect-ratio: auto;
+    height: min(46dvh, 430px);
+  }
+
+  .appview__bar {
+    padding: 6px 8px;
+  }
+
+  .appview__foot {
+    padding: 6px 8px;
+    gap: 8px;
+  }
+}
+
+/* "Un poquito más arriba": on a phone the header slims down so the picture
+   starts higher and the pixels go to the film, not the chrome. */
+@media (max-width: 900px) {
+  .topbar {
+    padding: max(6px, env(safe-area-inset-top)) 12px 6px;
+    min-height: 46px;
+    gap: 9px;
+  }
+
+  .topbar__name {
+    font-size: 15px;
+  }
+
+  .topbar__sub {
+    font-size: 11.5px;
+  }
+
+  .stage {
+    padding-top: 6px;
   }
 }

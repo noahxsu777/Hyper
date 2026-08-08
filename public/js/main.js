@@ -104,6 +104,8 @@ initApps({
 /** An app owns the screen, or gives it back to the idle overlay. */
 function renderActivityView() {
   renderActivity(room.activity)
+  // The controls bar swaps shape with the screen's owner (browser vs app).
+  renderControls()
   if (room.activity) {
     els.overlay.hidden = true
     els.badge.hidden = true
@@ -545,6 +547,12 @@ function renderControls() {
     })
 
   addressInput.disabled = !live
+
+  // With an app on the screen, the browser-only controls are dead weight —
+  // CSS hides them and hands the row back to the picture. And when anything
+  // is actually showing, the phone gives the screen more height.
+  els.controls.dataset.app = String(Boolean(room.activity))
+  els.app.dataset.live = String(Boolean(room.hb || room.activity || room.starting))
 
   fill(
     els.controls,
