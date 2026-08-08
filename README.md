@@ -20,8 +20,9 @@ cp .env.example .env      # y pon tu clave en HYPERBEAM_API_KEY
 npm start                 # http://localhost:3000
 ```
 
-Comparte esa dirección (o el botón **Invitar**) y quien la abra entra en la
-misma sala. La app arranca aunque no haya clave: te dirá exactamente qué falta.
+Crea una sala, comparte su **código de 6 letras** (o el enlace `/ABC123`) y
+quien lo tenga entra contigo. Cada sala es independiente: su gente, su chat y su
+navegador compartido. La app arranca aunque no haya clave: te dirá qué falta.
 
 ### Variables de entorno
 
@@ -35,6 +36,8 @@ misma sala. La app arranca aunque no haya clave: te dirá exactamente qué falta
 | `HB_OFFLINE_TIMEOUT` | `60` | Segundos sin nadie conectado antes de que la máquina se apague sola. |
 | `ROOM_NAME` | `Sala de cine` | Nombre que aparece arriba. |
 | `ROOM_OWNER_GRACE_MS` | `180000` | Cuánto espera la sala a un anfitrión desconectado antes de pasar el mando. |
+| `ROOM_EMPTY_TTL_MS` | `120000` | Cuánto sobrevive una sala vacía antes de cerrarse y apagar su navegador. |
+| `MAX_ROOMS` | `25` | Salas abiertas a la vez. Cada una puede gastar minutos de Hyperbeam. |
 | `PORT` | `3000` | Puerto del servidor. |
 
 ---
@@ -77,18 +80,44 @@ watch party, una máquina sobra.
 
 ---
 
-## Anfitrión e invitados
+## Salas
 
-Quien entra primero **lleva la sala**. Es quien elige qué se ve: abre el
-navegador, escribe direcciones, controla la reproducción y el volumen de todos.
-El resto son **invitados**: ven la misma pantalla y hablan por el chat, pero no
-tocan la película.
+No hay una sala única: cada una nace con un código de seis caracteres (sin O/0
+ni I/1, porque se dictan por teléfono) y vive por su cuenta —su gente, su chat,
+su navegador compartido y sus reglas—. El enlace `tudominio/ABC123` entra
+directo.
 
-No es solo que se les escondan los botones. El servidor le entrega al anfitrión
-un secreto al entrar, y las rutas que abren o cierran el navegador lo exigen: un
-invitado que llame a la API a mano recibe un 403. Además su cliente arranca con
-`disableInput`, así que sus clics y teclas ni siquiera salen hacia el navegador
-compartido.
+Una sala vacía se cierra sola pasado `ROOM_EMPTY_TTL_MS` y se lleva su navegador
+virtual con ella, que es lo que cuesta dinero.
+
+## Anfitrión, moderadores e invitados
+
+Quien crea la sala **la lleva**. Puede nombrar **moderadores**, y entre todos
+ellos eligen qué se ve: abren el navegador, escriben direcciones, controlan la
+reproducción y el volumen de la sala. El resto son **invitados**: ven la misma
+pantalla y hablan por el chat.
+
+| | Anfitrión | Moderador | Invitado |
+| --- | :-: | :-: | :-: |
+| Ver y chatear | ✓ | ✓ | ✓ |
+| Abrir y cerrar el navegador | ✓ | ✓ | |
+| Controlar la película y el volumen de la sala | ✓ | ✓ | |
+| Expulsar invitados | ✓ | ✓ | |
+| Nombrar moderadores | ✓ | | |
+| Cerrar la sala | ✓ | | |
+
+Un moderador no puede expulsar a otro moderador, y nadie puede tocar al
+anfitrión.
+
+No es solo que se escondan los botones. El servidor entrega a cada persona un
+secreto al entrar y las rutas comprueban qué compra ese secreto: un invitado que
+llame a la API a mano recibe un 403, y sin secreto un 401. Además su cliente
+arranca con `disableInput`, así que sus clics y teclas ni siquiera salen hacia el
+navegador compartido.
+
+**Expulsar** saca a alguien de la sala y le impide volver con ese navegador.
+**Sala cerrada** (en ⚙, solo el anfitrión) deja fuera a cualquiera nuevo; los que
+ya están dentro se quedan.
 
 El anfitrión lo es **por navegador, no por conexión**. Bloquear el móvil, cambiar
 de app o recargar la página tira el socket, pero al volver sigues siendo el
@@ -139,11 +168,12 @@ vez de quedarse bloqueado esperando a alguien que no va a volver.
    El panel se cierra con la X, con `Esc` o tocando fuera.
 6. **Modo cine** esconde el chat; el botón de al lado pone la ventana a pantalla
    completa.
-7. Escribe **`!love`** en el chat y una animación se reproduce para toda la
-   sala y luego se va sola. No deja mensaje: es un momento, no una conversación,
-   así que quien entre después no se encuentra la pantalla llena de corazones.
-   Los comandos los define el servidor (`COMMANDS` en `server/party.js`), así
-   que añadir otro es una línea.
+7. Escribe **`!love`**, **`!pork`** o **`!drag`** en el chat y una animación se
+   reproduce para toda la sala y luego se va sola. No dejan mensaje: son un
+   momento, no una conversación, así que quien entre después no se encuentra la
+   pantalla llena de corazones. Los comandos los define el servidor (`COMMANDS`
+   en `server/rooms.js`) y aceptan tanto un Lottie como una imagen, así que
+   añadir otro es una línea.
 8. El botón 🙂 del chat abre los **stickers**. El catálogo lo define el servidor
    y solo acepta identificadores de esa lista, así que nadie puede colar
    contenido propio en el chat de los demás.
@@ -170,6 +200,13 @@ acabó usando, y si tuvo que caer al siguiente te lo dice.
 
 Para confirmar cuál se está usando de verdad, abre el navegador compartido en
 `whatismybrowser.com/detect/what-is-my-user-agent`.
+
+### El teclado del móvil
+
+Un teclado en pantalla tapa la parte de abajo de la ventana sin que la página se
+entere: `100dvh` sigue midiendo todo el alto y el campo de mensaje acaba debajo
+de las teclas. La sala se mide con el *visual viewport*, que sí lo sabe, y
+mantiene el campo a la vista.
 
 ### Cuando vuelves a la app
 
@@ -210,9 +247,9 @@ navegador  ◀────{ embedUrl }─────  servidor  ◀──{ sess
 
 ```
 server/
-  index.js       Express: estáticos, /api/config, /api/session
+  index.js       Express: estáticos, /api/config, /api/rooms/:code/session
   hyperbeam.js   Cliente REST de Hyperbeam
-  party.js       WebSocket: presencia, chat e historial de la sala
+  rooms.js       Salas: presencia, chat, roles, moderación y WebSocket
 public/
   css/           reset · tokens (colores, materiales, muelles) · app
   js/

@@ -3,7 +3,7 @@
  * Reconnects on its own, because a dropped socket should not end the film.
  */
 
-export function connectParty({ name, clientId, onEvent }) {
+export function connectParty({ code, name, clientId, onEvent }) {
   const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`
 
   let socket = null
@@ -19,7 +19,7 @@ export function connectParty({ name, clientId, onEvent }) {
     socket.addEventListener("open", () => {
       attempt = 0
       onEvent({ type: "status", status: "connected" })
-      socket.send(JSON.stringify({ type: "join", name: currentName, clientId }))
+      socket.send(JSON.stringify({ type: "join", code, name: currentName, clientId }))
     })
 
     socket.addEventListener("message", (event) => {
@@ -51,6 +51,9 @@ export function connectParty({ name, clientId, onEvent }) {
     chat: (text) => send({ type: "chat", text }),
     sticker: (id) => send({ type: "sticker", id }),
     audio: (patch) => send({ type: "audio", ...patch }),
+    setRole: (targetId, role) => send({ type: "role", targetId, role }),
+    kick: (targetId) => send({ type: "kick", targetId }),
+    lock: (locked) => send({ type: "lock", locked }),
     rename(next) {
       currentName = next
       send({ type: "rename", name: next })

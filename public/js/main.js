@@ -9,7 +9,7 @@
 
 import { $, clamp, fill, h } from "./core/dom.js"
 import { icon } from "./core/icons.js"
-import { api, prettyHost, setOwnerToken, toUrl } from "./core/api.js"
+import { api, normalizeCode, prettyHost, setRoomToken, toUrl } from "./core/api.js"
 import { connectParty } from "./core/party.js"
 import { colourFor, initialsFor, set, state } from "./core/store.js"
 
@@ -44,6 +44,7 @@ const els = {
   panel: $("#panel"),
   sheets: $("#sheets"),
   toasts: $("#toasts"),
+  lobby: $("#lobby"),
 }
 
 const room = {
@@ -61,14 +62,25 @@ const room = {
   stickers: [],
   /** Chat commands the server understands, delivered on join. */
   commands: [],
-  /** Who runs the room, and whether that is us. */
+  /** Which room we are in. */
+  code: null,
+  locked: false,
+  /** Who runs the room, and what we are allowed to do in it. */
   ownerId: null,
-  isOwner: false,
+  role: "guest",
+  /** What proves that role to the HTTP routes. */
+  token: null,
   /** The film's own volume, shared by the whole room. */
   audio: { volume: 100, muted: false },
   /** Last state the Hyperbeam stream reported. */
   connection: "idle",
 }
+
+const isOwner = () => room.role === "owner"
+/** Owners and moderators drive the film and remove people. */
+const canModerate = () => room.role === "owner" || room.role === "moderator"
+
+const ROLE_LABEL = { owner: "Anfitrión", moderator: "Moderador", guest: "Invitado" }
 
 /* --------------------------------------------------------------------------
    System UI
@@ -144,15 +156,21 @@ function renderTopbar() {
     h(
       "div.topbar__titles",
       null,
-      h("div.topbar__name", { text: room.config?.roomName ?? "Sala" }),
+      h(
+        "div.topbar__name",
+        null,
+        h("span", { text: "Sala " }),
+        h("span.topbar__code", { text: room.code ?? "" }),
+        room.locked ? h("span", { html: icon("lock", { size: 13 }), title: "Sala cerrada" }) : null,
+      ),
       h(
         "div.topbar__sub",
         null,
         h("span.dot", { dataset: { live } }),
         h("span", { text: `${statusText} · ${count} ${count === 1 ? "persona" : "personas"}` }),
         h("span.tag", {
-          dataset: { tone: room.isOwner ? "ok" : "" },
-          text: room.isOwner ? "Anfitrión" : "Invitado",
+          dataset: { tone: isOwner() ? "ok" : room.role === "moderator" ? "accent" : "" },
+          text: ROLE_LABEL[room.role],
         }),
       ),
     ),
@@ -171,25 +189,41 @@ function renderTopbar() {
   )
 }
 
+function roomUrl() {
+  return `${location.origin}/${room.code ?? ""}`
+}
+
 function invite() {
-  const url = location.origin + location.pathname
-  navigator.clipboard
-    ?.writeText(url)
-    .then(() =>
-      toast({
-        title: "Enlace copiado",
-        text: "Quien lo abra entra en esta misma sala.",
-        glyph: "share",
-      }),
-    )
-    .catch(() =>
-      sheet((close) => [
-        h("div.sheet__title", { text: "Invita a la sala" }),
-        h("div.sheet__text", { text: "Comparte esta dirección:" }),
-        h("input.field", { value: url, readonly: true, onFocus: (e) => e.target.select() }),
-        h("button.btn", { type: "button", text: "Cerrar", onClick: close }),
-      ]),
-    )
+  const url = roomUrl()
+  sheet((close) => [
+    h("div.sheet__title", { text: "Invita a la sala" }),
+    h("div.sheet__text", { text: "Comparte el código, o el enlace directo." }),
+    h("div.code-display", { text: room.code ?? "—" }),
+    h("input.field", {
+      value: url,
+      readonly: true,
+      onFocus: (event) => event.target.select(),
+    }),
+    h("button.btn", {
+      type: "button",
+      text: "Copiar enlace",
+      onClick: () => {
+        navigator.clipboard
+          ?.writeText(url)
+          .then(() => {
+            close()
+            toast({ title: "Enlace copiado", text: url, glyph: "share" })
+          })
+          .catch(() => toast({ title: "Copia el enlace a mano", text: url }))
+      },
+    }),
+    room.locked
+      ? h("div.sheet__text", {
+          text: "Ojo: la sala está cerrada, así que nadie nuevo podrá entrar aunque tenga el enlace.",
+        })
+      : null,
+    h("button.btn", { type: "button", dataset: { tone: "quiet" }, text: "Cerrar", onClick: close }),
+  ])
 }
 
 /* --------------------------------------------------------------------------
@@ -224,7 +258,7 @@ function showIdle(note) {
   const configured = room.config?.configured
 
   // A guest has nothing to press here: the room's owner decides what goes on.
-  if (!room.isOwner) {
+  if (!canModerate()) {
     const ownerName = room.viewers.find((viewer) => viewer.id === room.ownerId)?.name
     showOverlay([
       h("h1.overlay__title", { text: "Esperando a que empiece" }),
@@ -260,7 +294,7 @@ function showIdle(note) {
           text: room.config?.error ?? "Falta la clave HYPERBEAM_API_KEY en el servidor.",
         })
       : null,
-    configured && room.isOwner ? servicesGrid() : null,
+    configured && canModerate() ? servicesGrid() : null,
     configured
       ? h("p.overlay__note", {
           style: { fontSize: "12.5px" },
@@ -301,7 +335,7 @@ const addressInput = h("input", {
 
 /** Most players answer to the same keys, so this is our transport bar. */
 function tapKey(key) {
-  if (!room.hb || !room.isOwner) return
+  if (!room.hb || !canModerate()) return
   room.hb.sendEvent({ type: "keydown", key })
   room.hb.sendEvent({ type: "keyup", key })
 }
@@ -407,14 +441,14 @@ function renderVolumePopover() {
     }),
     line({
       label: "Para toda la sala",
-      note: !room.isOwner
+      note: !canModerate()
         ? "Solo quien lleva la sala puede cambiarlo."
         : room.hb
           ? "Cambia el volumen de la película para todos. Funciona en YouTube, Twitch y Vimeo."
           : "Disponible cuando el navegador compartido esté abierto.",
       value: room.audio.volume,
       muted: room.audio.muted,
-      disabled: !room.hb || !room.isOwner,
+      disabled: !room.hb || !canModerate(),
       onValue: (next) => {
         driveRoomVolume(next)
         room.audio.volume = next
@@ -451,7 +485,7 @@ function renderControls() {
   // Anything that drives the shared browser needs both a browser to drive and
   // the right to drive it. The bar itself stays put either way, so a guest can
   // still reach their own volume, theatre mode and fullscreen.
-  const live = Boolean(room.hb) && room.isOwner
+  const live = Boolean(room.hb) && canModerate()
 
   const ctrl = (glyph, label, onClick, options = {}) =>
     h("button.ctrl", {
@@ -480,7 +514,7 @@ function renderControls() {
       }),
       ctrl("forward", "Avanzar", () => tapKey("ArrowRight"), { title: "Avanzar (→)" }),
     ),
-    room.isOwner
+    canModerate()
       ? h(
           "div.address",
           null,
@@ -636,22 +670,31 @@ let effectTimer = null
  * The animation is a third-party embed, so it goes in a sandboxed iframe: it
  * may run its own scripts, but it cannot navigate us or reach into the page.
  */
-function playEffect({ url, duration = 5000, by }) {
+function playEffect({ url, kind = "lottie", duration = 5000, by }) {
   if (!url) return
   clearTimeout(effectTimer)
 
-  const frame = h("iframe", {
-    src: url,
-    title: "Animación",
-    loading: "eager",
-    referrerpolicy: "no-referrer",
-    sandbox: "allow-scripts allow-same-origin",
-    allowtransparency: "true",
-  })
+  const media =
+    kind === "image"
+      ? h("img.effects__image", {
+          src: url,
+          alt: "",
+          referrerpolicy: "no-referrer",
+          // A hotlink-blocked or wrong URL should vanish, not sit there broken.
+          onError: (event) => event.currentTarget.remove(),
+        })
+      : h("iframe", {
+          src: url,
+          title: "Animación",
+          loading: "eager",
+          referrerpolicy: "no-referrer",
+          sandbox: "allow-scripts allow-same-origin",
+          allowtransparency: "true",
+        })
 
   fill(
     effectLayer,
-    h("div.effects__stage", null, frame, by ? h("div.effects__by", { text: by }) : null),
+    h("div.effects__stage", null, media, by ? h("div.effects__by", { text: by }) : null),
   )
   effectLayer.dataset.on = "true"
 
@@ -724,8 +767,20 @@ function renderPanelBody() {
   if (room.tab === "people") {
     fill(
       panelBody,
-      ...room.viewers.map((viewer) =>
-        h(
+      ...room.viewers.map((viewer) => {
+        const isYou = viewer.id === room.you?.id
+        const theirRole = viewer.role ?? "guest"
+
+        // The owner appoints moderators; moderators and the owner remove guests.
+        // Nobody can act on the owner, and a moderator cannot remove a peer.
+        const mayPromote = isOwner() && !isYou && theirRole !== "owner"
+        const mayKick =
+          canModerate() &&
+          !isYou &&
+          theirRole !== "owner" &&
+          !(room.role === "moderator" && theirRole === "moderator")
+
+        return h(
           "div.person",
           null,
           h("span.person__avatar", {
@@ -733,12 +788,36 @@ function renderPanelBody() {
             style: { background: colourFor(viewer.id + viewer.name) },
           }),
           h("span.person__name", { text: viewer.name }),
-          viewer.id === room.ownerId
-            ? h("span.tag", { dataset: { tone: "ok" }, text: "ANFITRIÓN" })
+          theirRole !== "guest"
+            ? h("span.tag", {
+                dataset: { tone: theirRole === "owner" ? "ok" : "accent" },
+                text: theirRole === "owner" ? "ANFITRIÓN" : "MOD",
+              })
             : null,
-          viewer.id === room.you?.id ? h("span.tag", { dataset: { tone: "accent" }, text: "TÚ" }) : null,
-        ),
-      ),
+          isYou ? h("span.tag", { dataset: { tone: "accent" }, text: "TÚ" }) : null,
+          mayPromote
+            ? h("button.person__act", {
+                type: "button",
+                title: theirRole === "moderator" ? "Quitar moderador" : "Hacer moderador",
+                "aria-label": theirRole === "moderator" ? "Quitar moderador" : "Hacer moderador",
+                dataset: { on: String(theirRole === "moderator") },
+                html: icon("shield", { size: 15 }),
+                onClick: () =>
+                  room.socket?.setRole(viewer.id, theirRole === "moderator" ? "guest" : "moderator"),
+              })
+            : null,
+          mayKick
+            ? h("button.person__act", {
+                type: "button",
+                title: "Expulsar",
+                "aria-label": `Expulsar a ${viewer.name}`,
+                dataset: { tone: "danger" },
+                html: icon("x", { size: 15 }),
+                onClick: () => confirmKick(viewer),
+              })
+            : null,
+        )
+      }),
     )
     return
   }
@@ -797,6 +876,50 @@ function renderPanelBody() {
   if (nearBottom) panelBody.scrollTop = panelBody.scrollHeight
 }
 
+/** A dead end: kicked, refused, or a room that no longer exists. */
+function showBlocked(title, text) {
+  room.hb = null
+  els.app.hidden = true
+  fill(
+    els.lobby,
+    h(
+      "div.lobby__card",
+      null,
+      h("h1.lobby__title", { text: title }),
+      h("p.lobby__note", { text }),
+      h("button.btn", {
+        type: "button",
+        text: "Volver al inicio",
+        onClick: () => {
+          history.replaceState(null, "", "/")
+          location.reload()
+        },
+      }),
+    ),
+  )
+  els.lobby.hidden = false
+}
+
+/** Removing someone is not undoable from here, so it asks first. */
+function confirmKick(viewer) {
+  sheet((close) => [
+    h("div.sheet__title", { text: `¿Expulsar a ${viewer.name}?` }),
+    h("div.sheet__text", {
+      text: "Saldrá de la sala y no podrá volver a entrar con este navegador.",
+    }),
+    h("button.btn", {
+      type: "button",
+      dataset: { tone: "destructive" },
+      text: "Expulsar",
+      onClick: () => {
+        room.socket?.kick(viewer.id)
+        close()
+      },
+    }),
+    h("button.btn", { type: "button", dataset: { tone: "quiet" }, text: "Cancelar", onClick: close }),
+  ])
+}
+
 /* --------------------------------------------------------------------------
    Hyperbeam
    -------------------------------------------------------------------------- */
@@ -814,7 +937,7 @@ async function start(startUrl) {
   try {
     const [{ default: Hyperbeam }, session] = await Promise.all([
       import("/vendor/hyperbeam.js"),
-      api.createSession({ startUrl }),
+      api.startSession(room.code, { startUrl }),
     ])
     await attach(Hyperbeam, session)
     if (startUrl) navigate(startUrl)
@@ -877,7 +1000,7 @@ async function reattach() {
     room.hb = null
     els.mount.replaceChildren()
 
-    const session = await api.getSession()
+    const session = await api.getSession(room.code)
     if (!session) {
       renderTopbar()
       renderControls()
@@ -942,7 +1065,7 @@ async function attach(Hyperbeam, session) {
   })
 
   // A guest watches: their clicks and keys never reach the shared browser.
-  room.hb.disableInput = !room.isOwner
+  room.hb.disableInput = !canModerate()
   room.connection = "playing"
   clearTimeout(stallTimer)
   els.badge.hidden = true
@@ -1034,7 +1157,7 @@ async function openSettings() {
 
   const [config, session] = await Promise.all([
     api.config().catch(() => null),
-    api.getSession().catch(() => null),
+    api.getSession(room.code).catch(() => null),
   ])
 
   sheet((dismiss) => {
@@ -1062,7 +1185,8 @@ async function openSettings() {
           : "Por defecto (Chrome de escritorio)",
       ],
       ["Personas en la sala", String(room.viewers.length)],
-      ["Tu papel", room.isOwner ? "Anfitrión — mandas tú" : "Invitado — solo ves"],
+      ["Tu papel", ROLE_LABEL[room.role]],
+      ["Código", room.code ?? "—"],
     ]
 
     return [
@@ -1089,12 +1213,32 @@ async function openSettings() {
           h("div.sheet__row", null, h("span", { text: label }), h("span", { text: value })),
         ),
       ),
+      isOwner()
+        ? h(
+            "label.sheet__toggle",
+            null,
+            h(
+              "span",
+              null,
+              h("span", { text: "Sala cerrada", style: { display: "block", fontWeight: "600" } }),
+              h("span", {
+                text: "Nadie nuevo puede entrar. Los que ya están se quedan.",
+                style: { display: "block", fontSize: "12.5px", color: "var(--label-2)" },
+              }),
+            ),
+            (() => {
+              const box = h("input", { type: "checkbox", checked: room.locked })
+              box.addEventListener("change", () => room.socket?.lock(box.checked))
+              return box
+            })(),
+          )
+        : null,
       config?.testKey
         ? h("div.sheet__text", {
             text: "La clave de prueba tiene minutos limitados: cierra el navegador al terminar.",
           })
         : null,
-      session && room.isOwner
+      session && canModerate()
         ? h("button.btn", {
             type: "button",
             dataset: { tone: "destructive" },
@@ -1107,7 +1251,7 @@ async function openSettings() {
                 /* already gone */
               }
               room.hb = null
-              await api.endSession().catch(() => {})
+              await api.endSession(room.code).catch(() => {})
               renderTopbar()
               renderControls()
               showIdle()
@@ -1165,7 +1309,7 @@ for (const type of ["keydown", "keyup"]) {
   window.addEventListener(
     type,
     (event) => {
-      if (!room.hb || !room.isOwner || isTyping() || event.metaKey || event.ctrlKey || event.altKey) return
+      if (!room.hb || !canModerate() || isTyping() || event.metaKey || event.ctrlKey || event.altKey) return
       // The film gets the key; the page should not also scroll.
       if ([" ", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
         event.preventDefault()
@@ -1196,6 +1340,40 @@ window.addEventListener("resize", () => fitToScreen())
 document.addEventListener("fullscreenchange", () => setTimeout(fitToScreen, 200))
 
 /* --------------------------------------------------------------------------
+   The on-screen keyboard
+   -------------------------------------------------------------------------- */
+
+/**
+ * A phone keyboard covers the bottom of the window without the page ever
+ * hearing about it: `100dvh` still measures the whole screen, so the composer
+ * ends up underneath the keys. The visual viewport does know, so the layout is
+ * sized from that instead, and the message field is kept in view.
+ */
+function trackKeyboard() {
+  const vv = window.visualViewport
+  if (!vv) return
+
+  const apply = () => {
+    // How much of the window the keyboard is covering.
+    const hidden = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
+    document.documentElement.style.setProperty("--keyboard", `${Math.round(hidden)}px`)
+    els.app.dataset.keyboard = hidden > 80 ? "true" : "false"
+    if (hidden > 80 && document.activeElement === composerField) {
+      composerField.scrollIntoView({ block: "nearest" })
+    }
+  }
+
+  vv.addEventListener("resize", apply)
+  vv.addEventListener("scroll", apply)
+  apply()
+}
+
+composerField.addEventListener("focus", () => {
+  // Give the keyboard a moment to finish animating before chasing the field.
+  setTimeout(() => composerField.scrollIntoView({ block: "nearest" }), 320)
+})
+
+/* --------------------------------------------------------------------------
    Popovers close when you look away from them
    -------------------------------------------------------------------------- */
 
@@ -1219,113 +1397,277 @@ window.addEventListener("keydown", (event) => {
    Boot
    -------------------------------------------------------------------------- */
 
-async function boot() {
-  room.config = await api.config().catch((error) => ({
-    configured: false,
-    error: `No se pudo hablar con el servidor: ${error.message}`,
-    roomName: "Sala",
-  }))
+/* --------------------------------------------------------------------------
+   Everything the room tells us
+   -------------------------------------------------------------------------- */
 
+function handleRoomEvent(event) {
+  switch (event.type) {
+    case "status":
+      room.status = event.status
+      renderTopbar()
+      break
+
+    case "welcome":
+      room.you = event.you
+      room.viewers = event.viewers
+      room.messages = event.history ?? []
+      room.stickers = event.stickers ?? []
+      room.commands = event.commands ?? []
+      room.code = event.code ?? room.code
+      room.locked = Boolean(event.locked)
+      room.ownerId = event.ownerId ?? null
+      room.role = event.role ?? "guest"
+      room.token = event.token
+      setRoomToken(event.token)
+      if (event.audio) room.audio = event.audio
+      renderTopbar()
+      renderControls()
+      renderPanel()
+      // Someone opened the browser before we arrived: join it.
+      if (event.session) join(event.session)
+      else showIdle()
+      break
+
+    case "role":
+      // The token is what the HTTP routes ask for; the role is what it buys.
+      setRoomToken(event.token)
+      room.token = event.token
+      room.role = event.role
+      room.ownerId = event.ownerId ?? room.ownerId
+      if (room.hb) room.hb.disableInput = !canModerate()
+      renderTopbar()
+      renderControls()
+      renderPanel()
+      if (!room.hb && !room.starting) showIdle()
+      break
+
+    case "presence":
+      room.viewers = event.viewers
+      room.ownerId = event.ownerId ?? room.ownerId
+      room.locked = Boolean(event.locked)
+      room.role = room.viewers.find((viewer) => viewer.id === room.you?.id)?.role ?? room.role
+      if (room.hb) room.hb.disableInput = !canModerate()
+      renderTopbar()
+      renderControls()
+      renderPanel()
+      if (!room.hb && !room.starting) showIdle()
+      break
+
+    case "you":
+      room.you = event.you
+      renderPanel()
+      break
+
+    case "chat":
+      room.messages.push(event.message)
+      if (room.messages.length > 200) room.messages.shift()
+      if (room.tab === "chat") renderPanelBody()
+      break
+
+    case "effect":
+      playEffect(event)
+      break
+
+    case "audio":
+      // Someone else moved the room's volume; follow along without touching the
+      // player, or every client would send its own keys and it would move once
+      // per person.
+      room.audio = event.audio
+      if (!volumePopover.hidden) renderVolumePopover()
+      renderControls()
+      break
+
+    case "session":
+      if (event.session) join(event.session)
+      else if (room.hb) {
+        try {
+          room.hb.destroy()
+        } catch {
+          /* already gone */
+        }
+        room.hb = null
+        renderTopbar()
+        renderControls()
+        showIdle("Se ha cerrado el navegador compartido.")
+      }
+      break
+
+    case "kicked":
+      room.socket?.close()
+      showBlocked("Te han expulsado", event.reason ?? "Ya no estás en esta sala.")
+      break
+
+    case "denied":
+      room.socket?.close()
+      showBlocked("No puedes entrar", event.reason ?? "La sala no te deja pasar.")
+      break
+
+    case "no-room":
+      room.socket?.close()
+      showLobby({ notice: `La sala ${event.code} ya no existe.` })
+      break
+  }
+}
+
+/* --------------------------------------------------------------------------
+   The lobby: no room yet
+   -------------------------------------------------------------------------- */
+
+/** Everything before a room exists: open one, or type someone else's code. */
+function showLobby({ notice, code = "" } = {}) {
+  els.app.hidden = true
+  els.lobby.hidden = false
+
+  const nameField = h("input.field", {
+    type: "text",
+    placeholder: "Tu nombre",
+    maxlength: "24",
+    value: state.name,
+    autocomplete: "nickname",
+  })
+
+  const codeField = h("input.field.field--code", {
+    type: "text",
+    placeholder: "CÓDIGO",
+    maxlength: "7",
+    value: code,
+    autocapitalize: "characters",
+    autocomplete: "off",
+    spellcheck: "false",
+    inputmode: "text",
+    onInput: (event) => {
+      event.target.value = normalizeCode(event.target.value)
+    },
+  })
+
+  const message = h("p.lobby__error", { hidden: true })
+  const say = (text) => {
+    message.textContent = text
+    message.hidden = !text
+  }
+  if (notice) say(notice)
+
+  const rememberName = () => {
+    const name = nameField.value.trim() || "Invitado"
+    set({ name })
+    return name
+  }
+
+  const createButton = h("button.btn", {
+    type: "button",
+    text: "Crear una sala",
+    onClick: async () => {
+      createButton.disabled = true
+      createButton.textContent = "Creando…"
+      try {
+        const { code: fresh } = await api.createRoom()
+        rememberName()
+        enterRoom(fresh)
+      } catch (error) {
+        say(error.message)
+        createButton.disabled = false
+        createButton.textContent = "Crear una sala"
+      }
+    },
+  })
+
+  const joinButton = h("button.btn", {
+    type: "button",
+    dataset: { tone: "quiet" },
+    text: "Entrar",
+    onClick: async () => {
+      const wanted = normalizeCode(codeField.value)
+      if (wanted.length < 6) return say("El código tiene 6 caracteres.")
+      joinButton.disabled = true
+      try {
+        const found = await api.findRoom(wanted)
+        if (!found) {
+          say("Esa sala no existe. Comprueba el código.")
+          return
+        }
+        if (found.locked) say("La sala está cerrada, puede que no te deje entrar.")
+        rememberName()
+        enterRoom(wanted)
+      } catch (error) {
+        say(error.message)
+      } finally {
+        joinButton.disabled = false
+      }
+    },
+  })
+
+  codeField.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") joinButton.click()
+  })
+
+  fill(
+    els.lobby,
+    h(
+      "div.lobby__card",
+      null,
+      h("div.lobby__mark", { html: icon("play", { size: 26 }) }),
+      h("h1.lobby__title", { text: "Watch Party" }),
+      h("p.lobby__note", {
+        text: "Un solo navegador para toda la sala. Pon una película y la veis a la vez.",
+      }),
+      nameField,
+      createButton,
+      h("div.lobby__or", null, h("span", { text: "o entra con un código" })),
+      h("div.lobby__join", null, codeField, joinButton),
+      message,
+      room.config && !room.config.configured
+        ? h("p.lobby__error", { text: room.config.error })
+        : null,
+    ),
+  )
+
+  setTimeout(() => (state.name ? codeField : nameField).focus({ preventScroll: true }), 80)
+}
+
+/* --------------------------------------------------------------------------
+   Boot
+   -------------------------------------------------------------------------- */
+
+/** Walk into a room: put it in the URL, wire the socket, show the app. */
+function enterRoom(code) {
+  room.code = normalizeCode(code)
+  history.replaceState(null, "", `/${room.code}`)
+
+  els.lobby.hidden = true
+  els.app.hidden = false
   els.app.dataset.theatre = String(Boolean(state.theatre))
   els.stage.append(volumePopover)
   els.controls.hidden = false
+
   renderControls()
   renderTopbar()
   renderPanel()
   showIdle()
+  trackKeyboard()
 
-  const name = state.name || (await askName())
-
+  room.socket?.close()
   room.socket = connectParty({
-    name,
+    code: room.code,
+    name: state.name || "Invitado",
     clientId: state.clientId,
-    onEvent(event) {
-      switch (event.type) {
-        case "status":
-          room.status = event.status
-          renderTopbar()
-          break
-
-        case "owner":
-          // Only the owner is ever handed this; it is what the HTTP routes ask for.
-          setOwnerToken(event.token)
-          room.ownerId = event.ownerId
-          room.isOwner = true
-          if (room.hb) room.hb.disableInput = false
-          renderTopbar()
-          renderControls()
-          renderPanel()
-          if (!room.hb) showIdle()
-          break
-
-        case "welcome":
-          room.you = event.you
-          room.viewers = event.viewers
-          room.messages = event.history ?? []
-          room.stickers = event.stickers ?? []
-          room.commands = event.commands ?? []
-          room.ownerId = event.ownerId ?? null
-          room.isOwner = room.ownerId === event.you?.id
-          if (event.audio) room.audio = event.audio
-          renderTopbar()
-          renderControls()
-          renderPanel()
-          // Someone opened the browser before we arrived: join it.
-          if (event.session) join(event.session)
-          else showIdle()
-          break
-
-        case "effect":
-          playEffect(event)
-          break
-
-        case "audio":
-          // Someone else moved the room's volume; follow along without
-          // touching the player, or every client would send its own keys.
-          room.audio = event.audio
-          if (!volumePopover.hidden) renderVolumePopover()
-          renderControls()
-          break
-
-        case "you":
-          room.you = event.you
-          renderPanel()
-          break
-
-        case "presence":
-          room.viewers = event.viewers
-          room.ownerId = event.ownerId ?? room.ownerId
-          room.isOwner = Boolean(room.you && room.ownerId === room.you.id)
-          if (room.hb) room.hb.disableInput = !room.isOwner
-          renderTopbar()
-          renderControls()
-          renderPanel()
-          if (!room.hb && !room.starting) showIdle()
-          break
-
-        case "chat":
-          room.messages.push(event.message)
-          if (room.messages.length > 200) room.messages.shift()
-          if (room.tab === "chat") renderPanelBody()
-          break
-
-        case "session":
-          if (event.session) join(event.session)
-          else if (room.hb) {
-            try {
-              room.hb.destroy()
-            } catch {
-              /* already gone */
-            }
-            room.hb = null
-            renderTopbar()
-            renderControls()
-            showIdle("Alguien ha cerrado el navegador compartido.")
-          }
-          break
-      }
-    },
+    onEvent: handleRoomEvent,
   })
+}
+
+async function boot() {
+  room.config = await api.config().catch((error) => ({
+    configured: false,
+    error: `No se pudo hablar con el servidor: ${error.message}`,
+  }))
+
+  // /ABC123 walks straight into that room; anything else is the lobby.
+  const fromUrl = normalizeCode(location.pathname.slice(1))
+  if (fromUrl.length === 6 && state.name) {
+    enterRoom(fromUrl)
+    return
+  }
+  showLobby({ code: fromUrl.length === 6 ? fromUrl : "" })
 }
 
 boot()

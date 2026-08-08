@@ -1,16 +1,19 @@
 /** Client for our own backend, which brokers the Hyperbeam REST API. */
 
-/** Proof that we are the room's owner, handed over the socket on join. */
-let ownerToken = null
-export const setOwnerToken = (token) => {
-  ownerToken = token
+/**
+ * Proof of who we are in a room, handed over the socket on join. The server
+ * decides what it entitles us to; we just carry it.
+ */
+let roomToken = null
+export const setRoomToken = (token) => {
+  roomToken = token
 }
 
 async function request(path, options = {}) {
   const res = await fetch(path, {
     headers: {
       "Content-Type": "application/json",
-      ...(ownerToken ? { "x-owner-token": ownerToken } : {}),
+      ...(roomToken ? { "x-room-token": roomToken } : {}),
     },
     ...options,
     body: options.body ? JSON.stringify(options.body) : undefined,
@@ -27,24 +30,39 @@ async function request(path, options = {}) {
 }
 
 export const api = {
-  /** Backend + key status, safe to show in Settings. */
+  /** Backend + key status, safe to show in the room settings. */
   config: () => request("/api/config"),
 
-  /** Join the shared virtual computer, starting it if needed. */
-  createSession: (options = {}) => request("/api/session", { method: "POST", body: options }),
+  /** Open a new room; resolves to its code. */
+  createRoom: () => request("/api/rooms", { method: "POST" }),
 
-  /** The running session, or null when there is none. */
-  async getSession() {
+  /** Does this code lead anywhere? Resolves to null when it does not. */
+  async findRoom(code) {
     try {
-      return await request("/api/session")
+      return await request(`/api/rooms/${encodeURIComponent(code)}`)
     } catch (err) {
       if (err.status === 404) return null
       throw err
     }
   },
 
-  /** Shut the virtual computer down so it stops consuming minutes. */
-  endSession: () => request("/api/session", { method: "DELETE" }),
+  /** Start this room's shared browser, or join the one already running. */
+  startSession: (code, options = {}) =>
+    request(`/api/rooms/${encodeURIComponent(code)}/session`, { method: "POST", body: options }),
+
+  /** The room's running session, or null when there is none. */
+  async getSession(code) {
+    try {
+      return await request(`/api/rooms/${encodeURIComponent(code)}/session`)
+    } catch (err) {
+      if (err.status === 404) return null
+      throw err
+    }
+  },
+
+  /** Shut the room's browser down so it stops consuming minutes. */
+  endSession: (code) =>
+    request(`/api/rooms/${encodeURIComponent(code)}/session`, { method: "DELETE" }),
 }
 
 /**
@@ -68,3 +86,10 @@ export function prettyHost(url) {
     return url ?? ""
   }
 }
+
+/** Room codes are six characters, upper case, no punctuation. */
+export const normalizeCode = (value) =>
+  String(value ?? "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 6)

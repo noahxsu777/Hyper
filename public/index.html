@@ -2,7 +2,12 @@
 <html lang="es">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- `interactive-widget` stops Chrome on Android from shoving the whole page
+         up when the keyboard opens; the layout resizes instead. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+    />
     <meta name="theme-color" content="#000000" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -21,7 +26,10 @@
     />
   </head>
   <body>
-    <div class="app" id="app" data-theatre="false">
+    <!-- Before any room exists: create one, or type a code. -->
+    <div class="lobby" id="lobby" hidden></div>
+
+    <div class="app" id="app" data-theatre="false" hidden>
       <header class="topbar" id="topbar"></header>
 
       <main class="stage" id="stage">

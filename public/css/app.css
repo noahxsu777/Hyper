@@ -9,7 +9,9 @@ body {
 }
 
 .app {
-  height: 100dvh;
+  /* --keyboard is set from the visual viewport: 100dvh keeps measuring the
+     whole screen even while the keys cover half of it. */
+  height: calc(100dvh - var(--keyboard, 0px));
   display: grid;
   grid-template-columns: 1fr minmax(300px, 360px);
   grid-template-rows: auto 1fr;
@@ -17,6 +19,11 @@ body {
     "topbar topbar"
     "stage  panel";
   background: radial-gradient(120% 90% at 50% -20%, #17131f 0%, #08080b 60%, #000 100%);
+}
+
+/* `display: grid` above would otherwise beat the UA rule for [hidden]. */
+.app[hidden] {
+  display: none;
 }
 
 /* Theatre mode hides the chat so the picture takes the whole window. */
@@ -1231,12 +1238,21 @@ body {
   }
 }
 
-.effects__stage iframe {
+.effects__stage iframe,
+.effects__image {
   width: min(230px, 62%);
   aspect-ratio: 1;
   border: 0;
   background: transparent;
   pointer-events: none;
+}
+
+.effects__image {
+  height: auto;
+  aspect-ratio: auto;
+  max-height: 60%;
+  object-fit: contain;
+  filter: drop-shadow(0 10px 30px rgba(0, 0, 0, 0.6));
 }
 
 .effects__by {
@@ -1283,4 +1299,193 @@ body {
 
 .badge__retry:hover {
   filter: brightness(1.1);
+}
+
+/* ===========================================================================
+   Lobby — before there is a room
+   =========================================================================== */
+
+.lobby {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: radial-gradient(120% 90% at 50% -10%, #201a35 0%, #0a0a10 55%, #000 100%);
+}
+
+.lobby[hidden] {
+  display: none;
+}
+
+.lobby__card {
+  width: min(400px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 30px 26px;
+  border-radius: 22px;
+  background: var(--bg-grouped-secondary);
+  border: 0.5px solid var(--separator);
+  box-shadow: 0 40px 90px -25px rgba(0, 0, 0, 0.85);
+  text-align: center;
+}
+
+.lobby__mark {
+  width: 52px;
+  height: 52px;
+  margin: 0 auto;
+  border-radius: 15px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(150deg, #a78bfa, #6d3cf5);
+  color: #fff;
+  box-shadow: 0 14px 34px -12px rgba(124, 92, 255, 0.8);
+}
+
+.lobby__title {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+
+.lobby__note {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--label-2);
+  margin-bottom: 4px;
+}
+
+.lobby__or {
+  position: relative;
+  margin: 4px 0;
+  font-size: 12px;
+  color: var(--label-3);
+}
+
+.lobby__or::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 0.5px;
+  background: var(--separator);
+}
+
+.lobby__or span {
+  position: relative;
+  padding: 0 10px;
+  background: var(--bg-grouped-secondary);
+}
+
+.lobby__join {
+  display: flex;
+  gap: 8px;
+}
+
+.lobby__join .btn {
+  width: auto;
+  flex: none;
+  padding-left: 22px;
+  padding-right: 22px;
+}
+
+.field--code {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+}
+
+.lobby__error {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--orange);
+}
+
+.lobby__error[hidden] {
+  display: none;
+}
+
+/* The room code, shown large enough to read out loud. */
+.code-display {
+  font-family: var(--font-mono);
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: 6px;
+  text-align: center;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--fill-3);
+  color: var(--label);
+}
+
+.topbar__code {
+  font-family: var(--font-mono);
+  letter-spacing: 1.5px;
+}
+
+.topbar__name svg {
+  width: 13px;
+  height: 13px;
+  display: inline-block;
+  vertical-align: -1px;
+  margin-left: 5px;
+  color: var(--label-2);
+}
+
+/* ===========================================================================
+   Moderation
+   =========================================================================== */
+
+.person__act {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  flex: none;
+  display: grid;
+  place-items: center;
+  background: var(--fill-3);
+  color: var(--label-2);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.person__act:hover {
+  background: var(--fill-2);
+  color: var(--label);
+}
+
+.person__act[data-on="true"] {
+  background: rgba(124, 92, 255, 0.22);
+  color: var(--accent-soft);
+}
+
+.person__act[data-tone="danger"]:hover {
+  background: rgba(255, 69, 58, 0.2);
+  color: var(--red);
+}
+
+.sheet__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 15px;
+  border-radius: 12px;
+  background: var(--fill-3);
+  text-align: left;
+  cursor: pointer;
+}
+
+.sheet__toggle input {
+  width: 44px;
+  height: 26px;
+  flex: none;
+  accent-color: var(--accent);
 }
