@@ -2487,3 +2487,25 @@ body {
     padding-top: 6px;
   }
 }
+
+/* Full bleed on the phone: no frame above or beside the screen. The desktop
+   keeps its cinema card; a phone is all screen already. */
+@media (max-width: 900px) {
+  .stage {
+    padding: 0;
+    gap: 0;
+  }
+
+  .screen {
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .controls {
+    margin: 8px 10px;
+  }
+
+  .screen__overlay {
+    padding: 18px 14px;
+  }
+}
