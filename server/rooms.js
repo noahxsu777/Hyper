@@ -15,6 +15,7 @@ import { randomBytes } from "node:crypto"
 import { WebSocketServer } from "ws"
 
 import { isGiphyUrl } from "./giphy.js"
+import { GAMES } from "./games.js"
 
 const HISTORY_LIMIT = 120
 const NAME_LIMIT = 24
@@ -85,6 +86,49 @@ const clean = (value, limit) =>
 
 const secret = () => randomBytes(24).toString("base64url")
 
+/* ------------------------------------------------------------------- apps */
+
+/** For the system messages; the client has its own richer catalog. */
+const APP_NAMES = {
+  youtube: "YouTube",
+  twitch: "Twitch",
+  netflix: "Netflix sincronizado",
+  ttt: "Tres en raya",
+  c4: "Cuatro en raya",
+  damas: "Damas",
+  chess: "Ajedrez",
+}
+
+/**
+ * Whatever someone pasted, reduced to a video id or nothing. Accepting only
+ * the id — never the URL — is what keeps this from becoming a way to embed
+ * arbitrary pages on everyone's screen.
+ */
+function ytVideoId(value) {
+  const raw = String(value ?? "").trim()
+  if (/^[\w-]{11}$/.test(raw)) return raw
+  try {
+    const url = new URL(raw)
+    if (!/(^|\.)youtube\.com$/.test(url.hostname) && !/(^|\.)youtu\.be$/.test(url.hostname)) return null
+    if (url.hostname.endsWith("youtu.be")) {
+      const id = url.pathname.slice(1).split("/")[0]
+      return /^[\w-]{11}$/.test(id) ? id : null
+    }
+    const v = url.searchParams.get("v")
+    if (v && /^[\w-]{11}$/.test(v)) return v
+    const path = url.pathname.match(/\/(?:shorts|embed|live)\/([\w-]{11})/)
+    return path ? path[1] : null
+  } catch {
+    return null
+  }
+}
+
+/** Twitch channel names are plain handles; anything else is not a channel. */
+function twitchChannel(value) {
+  const raw = String(value ?? "").trim().toLowerCase().replace(/^.*twitch\.tv\//, "").split(/[/?#]/)[0]
+  return /^[a-z0-9_]{3,25}$/.test(raw) ? raw : null
+}
+
 /**
  * One party.
  */
@@ -114,6 +158,12 @@ class Room {
     /** The shared Hyperbeam computer, owned by this room alone. */
     this.session = null
     this.inflight = null
+
+    /**
+     * What the room's screen is doing instead of the browser: a synced video,
+     * a live channel, a board game, or nothing. One screen, one activity.
+     */
+    this.activity = null
 
     this.handoverTimer = null
     this.emptyTimer = null
@@ -273,6 +323,7 @@ class Room {
       commands: COMMANDS.map(({ command, label }) => ({ command, label })),
       audio: this.audio,
       session: this.publicSession(),
+      activity: this.publicActivity(),
       ...this.state(),
     })
     this.announce()
@@ -375,6 +426,203 @@ class Room {
 
   /* -------------------------------------------------------------- session */
 
+  /* ------------------------------------------------------------ activity */
+
+  /** Where the shared video actually is right now, clock included. */
+  ytPosition() {
+    const a = this.activity
+    if (!a || a.kind !== "youtube") return 0
+    return Math.max(0, a.position + (a.playing ? (Date.now() - a.at) / 1000 : 0))
+  }
+
+  /**
+   * The activity as the room may see it. Seats publish the viewer's room id
+   * and name, never the clientId: the clientId is what proves who you are,
+   * and broadcasting it would hand that proof to everyone else.
+   */
+  publicActivity() {
+    const a = this.activity
+    if (!a) return null
+    switch (a.kind) {
+      case "youtube":
+        return { kind: "youtube", videoId: a.videoId, playing: a.playing, position: this.ytPosition() }
+      case "twitch":
+        return { kind: "twitch", channel: a.channel }
+      case "netflix":
+        return { kind: "netflix", title: a.title }
+      case "game": {
+        const seat = (held) => {
+          if (!held) return null
+          const live = this.viewerByClientId(held.clientId)
+          return { id: live?.id ?? null, name: live?.name ?? held.name, here: Boolean(live) }
+        }
+        return { kind: "game", game: a.game, state: a.state, seats: { p1: seat(a.seats.p1), p2: seat(a.seats.p2) } }
+      }
+      default:
+        return null
+    }
+  }
+
+  setActivity(activity) {
+    this.activity = activity
+    this.broadcast({ type: "activity", activity: this.publicActivity() })
+  }
+
+  deny(socket, reason) {
+    this.send(socket, { type: "app-denied", reason })
+  }
+
+  /** Which seat this person holds in the current game, if any. */
+  seatOf(clientId) {
+    const a = this.activity
+    if (a?.kind !== "game") return null
+    if (a.seats.p1?.clientId === clientId) return "p1"
+    if (a.seats.p2?.clientId === clientId) return "p2"
+    return null
+  }
+
+  handleApp(viewer, payload) {
+    const mod = this.canModerate(viewer.clientId)
+    const a = this.activity
+
+    switch (payload.action) {
+      /* What is on the screen is the moderators' call, same as the film. */
+      case "open": {
+        if (!mod) return this.deny(viewer.socket, "Solo quien lleva la sala puede abrir apps.")
+        if (this.session) {
+          return this.deny(viewer.socket, "Cierra el navegador compartido para usar las apps.")
+        }
+        const app = String(payload.app)
+        if (app === "youtube") {
+          const videoId = ytVideoId(payload.video)
+          this.setActivity({ kind: "youtube", videoId, playing: Boolean(videoId), position: 0, at: Date.now() })
+        } else if (app === "twitch") {
+          this.setActivity({ kind: "twitch", channel: twitchChannel(payload.channel) })
+        } else if (app === "netflix") {
+          this.setActivity({ kind: "netflix", title: "" })
+        } else if (GAMES[app]) {
+          this.setActivity({ kind: "game", game: app, state: GAMES[app].create(), seats: { p1: null, p2: null } })
+        } else return
+        this.system(`${viewer.name} ha abierto ${APP_NAMES[app] ?? app}`)
+        return
+      }
+
+      case "close":
+        if (!mod) return this.deny(viewer.socket, "Solo quien lleva la sala puede cerrar la app.")
+        if (!a) return
+        this.setActivity(null)
+        this.system(`${viewer.name} ha cerrado ${APP_NAMES[a.kind === "game" ? a.game : a.kind] ?? "la app"}`)
+        return
+
+      /* ------------------------------------------------- youtube controls */
+
+      case "video": {
+        if (!mod || a?.kind !== "youtube") return
+        const videoId = ytVideoId(payload.video)
+        if (!videoId) return this.deny(viewer.socket, "Eso no parece un enlace de YouTube.")
+        this.setActivity({ ...a, videoId, playing: true, position: 0, at: Date.now() })
+        return
+      }
+
+      case "play":
+      case "pause": {
+        if (!mod || a?.kind !== "youtube") return
+        const position = this.ytPosition()
+        this.setActivity({ ...a, playing: payload.action === "play", position, at: Date.now() })
+        return
+      }
+
+      case "seek": {
+        if (!mod || a?.kind !== "youtube") return
+        const position = Math.min(86400, Math.max(0, Number(payload.position) || 0))
+        this.setActivity({ ...a, position, at: Date.now() })
+        return
+      }
+
+      /* -------------------------------------------------- twitch controls */
+
+      case "channel": {
+        if (!mod || a?.kind !== "twitch") return
+        const channel = twitchChannel(payload.channel)
+        if (!channel) return this.deny(viewer.socket, "Eso no parece un canal de Twitch.")
+        this.setActivity({ ...a, channel })
+        return
+      }
+
+      /* ------------------------------------------------- netflix controls */
+
+      case "title": {
+        if (!mod || a?.kind !== "netflix") return
+        this.setActivity({ ...a, title: clean(payload.title, 80) })
+        return
+      }
+
+      case "cue": {
+        // Ephemeral by design: a countdown that happened is not state.
+        if (!mod || a?.kind !== "netflix") return
+        const cue = String(payload.cue)
+        if (!["countdown", "play", "pause"].includes(cue)) return
+        this.broadcast({ type: "cue", cue, by: viewer.name, at: Date.now() })
+        return
+      }
+
+      /* ------------------------------------------------------------ games */
+      /* Opening a game is gated; playing one is for everyone in the room.  */
+
+      case "sit": {
+        if (a?.kind !== "game") return
+        const seat = payload.seat === "p2" ? "p2" : "p1"
+        const held = a.seats[seat]
+        // A seat is takeable when empty, or when whoever held it is gone.
+        if (held && this.viewerByClientId(held.clientId)) {
+          return this.deny(viewer.socket, "Ese asiento está ocupado.")
+        }
+        if (this.seatOf(viewer.clientId)) return this.deny(viewer.socket, "Ya estás jugando.")
+        a.seats[seat] = { clientId: viewer.clientId, name: viewer.name }
+        this.setActivity(a)
+        return
+      }
+
+      case "stand": {
+        if (a?.kind !== "game") return
+        const seat = this.seatOf(viewer.clientId)
+        if (!seat) return
+        a.seats[seat] = null
+        // A game missing a player is not a game in progress any more.
+        a.state = GAMES[a.game].create()
+        this.setActivity(a)
+        return
+      }
+
+      case "reset": {
+        if (a?.kind !== "game") return
+        if (!mod && !this.seatOf(viewer.clientId)) {
+          return this.deny(viewer.socket, "Solo los jugadores pueden reiniciar la partida.")
+        }
+        a.state = GAMES[a.game].create()
+        this.setActivity(a)
+        return
+      }
+
+      case "move": {
+        if (a?.kind !== "game") return
+        const seat = this.seatOf(viewer.clientId)
+        if (!seat) return this.deny(viewer.socket, "Siéntate para jugar.")
+        if (!a.seats.p1 || !a.seats.p2) return this.deny(viewer.socket, "Falta el otro jugador.")
+        const result = GAMES[a.game].move(a.state, seat, payload.move ?? {})
+        if (!result.ok) return this.deny(viewer.socket, result.error)
+        a.state = result.state
+        this.setActivity(a)
+        if (result.state.winner === "draw") this.system(`Tablas en ${APP_NAMES[a.game]}`)
+        else if (result.state.winner) {
+          const name = a.seats[result.state.winner]?.name ?? "alguien"
+          this.system(`${name} gana en ${APP_NAMES[a.game]}`)
+        }
+        return
+      }
+    }
+  }
+
   /**
    * What a stranger may know about this room from the landing page: enough to
    * decide whether to walk in, and nothing else. No chat, no roster, no token.
@@ -411,6 +659,8 @@ class Room {
 
   setSession(session) {
     this.session = session
+    // One screen: the shared browser and an app cannot both hold it.
+    if (this.activity) this.setActivity(null)
     this.broadcast({ type: "session", session: this.publicSession() })
     this.system("Se ha abierto el navegador de la sala")
   }
@@ -476,6 +726,10 @@ class Room {
         })
         return
       }
+
+      case "app":
+        this.handleApp(viewer, payload)
+        return
 
       case "audio": {
         // The film's volume belongs to whoever is running the room.

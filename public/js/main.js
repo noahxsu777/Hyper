@@ -12,6 +12,7 @@ import { icon } from "./core/icons.js"
 import { api, normalizeCode, prettyHost, setRoomToken, toUrl } from "./core/api.js"
 import { connectParty } from "./core/party.js"
 import { colourFor, initialsFor, set, state } from "./core/store.js"
+import { initApps, openAppsGallery, renderActivity, setAppVolume, showCue } from "./apps.js"
 
 /* --------------------------------------------------------------------------
    Where films live. The DRM ones are flagged honestly further down.
@@ -74,11 +75,40 @@ const room = {
   audio: { volume: 100, muted: false },
   /** Last state the Hyperbeam stream reported. */
   connection: "idle",
+  /** What the screen shows instead of the browser: app, game, or nothing. */
+  activity: null,
 }
 
 const isOwner = () => room.role === "owner"
 /** Owners and moderators drive the film and remove people. */
 const canModerate = () => room.role === "owner" || room.role === "moderator"
+
+/* The apps live inside the screen: same rectangle as the shared browser. */
+const appHost = h("div.appview", { hidden: true })
+const cueLayer = h("div.cue-layer", { hidden: true })
+els.screen.append(appHost, cueLayer)
+
+initApps({
+  container: appHost,
+  cueLayer,
+  send: (payload) => room.socket?.app(payload),
+  canModerate,
+  you: () => room.you,
+  sheet: (build) => sheet(build),
+  toast: (options) => toast(options),
+  browserLive: () => Boolean(room.hb || room.starting),
+})
+
+/** An app owns the screen, or gives it back to the idle overlay. */
+function renderActivityView() {
+  renderActivity(room.activity)
+  if (room.activity) {
+    els.overlay.hidden = true
+    els.badge.hidden = true
+  } else if (!room.hb && !room.starting) {
+    showIdle()
+  }
+}
 
 const ROLE_LABEL = { owner: "Anfitrión", moderator: "Moderador", guest: "Invitado" }
 
@@ -255,6 +285,11 @@ function servicesGrid() {
 }
 
 function showIdle(note) {
+  // An app has the screen: the idle overlay must not paint over the game.
+  if (room.activity) {
+    els.overlay.hidden = true
+    return
+  }
   const configured = room.config?.configured
 
   // A guest has nothing to press here: the room's owner decides what goes on.
@@ -286,6 +321,13 @@ function showIdle(note) {
       disabled: !configured,
       html: `${icon("power", { size: 21 })}<span>Abrir el navegador compartido</span>`,
       onClick: () => start(),
+    }),
+    // The other road: synced YouTube, Twitch, cues and games. No Hyperbeam
+    // minutes involved, so it works even when the key above is missing.
+    h("button.overlay__apps", {
+      type: "button",
+      html: `${icon("apps", { size: 19 })}<span>Apps de la sala — vídeo y juegos</span>`,
+      onClick: openAppsGallery,
     }),
     // `text`, not `html`: the message can carry an upstream API response, and
     // that is not ours to trust as markup.
@@ -527,6 +569,19 @@ function renderControls() {
     h(
       "div.controls__group",
       null,
+      ctrl(
+        "apps",
+        "Apps de la sala",
+        () =>
+          canModerate()
+            ? openAppsGallery()
+            : toast({ title: "Apps", text: "Quien lleva la sala elige qué se abre.", glyph: "apps" }),
+        {
+          needsBrowser: false,
+          title: "Apps — vídeo sincronizado y juegos",
+          dataset: { on: String(Boolean(room.activity)) },
+        },
+      ),
       ctrl("reload", "Recargar", () => room.hb?.tabs.reload()),
       ctrl(
         state.muted || room.audio.muted ? "speaker-off" : "speaker",
@@ -553,6 +608,8 @@ function renderControls() {
 
 function applyVolume() {
   if (room.hb) room.hb.volume = state.muted ? 0 : state.volume
+  // The apps' players follow the same personal volume.
+  setAppVolume(state.muted ? 0 : state.volume)
 }
 
 function toggleTheatre() {
@@ -1572,12 +1629,13 @@ function handleRoomEvent(event) {
       room.token = event.token
       setRoomToken(event.token)
       if (event.audio) room.audio = event.audio
+      room.activity = event.activity ?? null
       renderTopbar()
       renderControls()
       renderPanel()
-      // Someone opened the browser before we arrived: join it.
+      // Someone opened the browser — or an app — before we arrived: join it.
       if (event.session) join(event.session)
-      else showIdle()
+      else renderActivityView()
       break
 
     case "role":
@@ -1618,6 +1676,19 @@ function handleRoomEvent(event) {
 
     case "effect":
       playEffect(event)
+      break
+
+    case "activity":
+      room.activity = event.activity
+      renderActivityView()
+      break
+
+    case "cue":
+      showCue(event)
+      break
+
+    case "app-denied":
+      toast({ title: "La sala dice que no", text: event.reason, glyph: "info" })
       break
 
     case "audio":

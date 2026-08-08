@@ -277,6 +277,42 @@ Pasada la gracia del anfitrión con la sala vacía, la sala queda libre: quien
 entre después la lleva. Una sala que conserva a un dueño que no está es una sala
 que nadie puede arrancar.
 
+### Apps de la sala
+
+El botón ⊞ de la barra (y «Apps de la sala» en la pantalla de espera) abre un
+catálogo tipo tienda: **Medios** y **Juegos**. Las apps ocupan la misma pantalla
+que el navegador compartido, pero no lo usan: **no gastan minutos de Hyperbeam**
+y funcionan aunque falte la clave.
+
+- **YouTube** — reproducción sincronizada de verdad. Quien lleva la sala pega un
+  enlace; el servidor guarda el vídeo, si está en marcha y en qué segundo, y
+  cada navegador reproduce su propia copia pegada al reloj de la sala (se
+  corrige sola si se desvía más de segundo y medio). Los controles del iframe
+  van desactivados: el mando es la barra de la sala, porque un play local de un
+  invitado solo desincronizaría su copia. El servidor solo acepta **IDs de
+  vídeo**, nunca URLs: aceptar URLs convertiría la app en una forma de incrustar
+  cualquier página en la pantalla de todos.
+- **Twitch** — todos el mismo canal; al ser directo, la sincronía la pone Twitch.
+- **Netflix (sincronizado)** — Netflix **no puede** reproducirse dentro de otra
+  web: prohíbe incrustarse y su DRM solo corre en su reproductor (Teleparty lo
+  resuelve con una extensión instalada en cada navegador, que aquí no hay). Así
+  que esta app sincroniza **a las personas**: cada uno abre Netflix con su
+  cuenta, y la sala manda la cuenta atrás y el ▶/⏸ en grande a todos a la vez.
+  Vale igual para Disney+, Prime o Max. La otra vía sigue existiendo: Netflix
+  dentro del navegador compartido, si el plan de Hyperbeam trae Widevine.
+- **Juegos** — cuatro en raya, tres en raya, damas y ajedrez. **Las reglas viven
+  en el servidor** (`server/games.js`): un movimiento llega como intención, se
+  valida contra el estado real y solo entonces se entera la sala — un navegador
+  mentiroso no puede corromper el tablero de nadie. El ajedrez es completo
+  (enroque con sus condiciones, al paso, promoción a dama, mate y ahogado;
+  validado con perft 20/400) y las damas llevan captura obligatoria, cadenas y
+  coronación. Abrir y cerrar apps es de moderadores, pero **sentarse a jugar es
+  de cualquiera**: los asientos son de la sala, y un asiento cuyo dueño se fue
+  se puede ocupar.
+
+Una pantalla, una cosa: abrir el navegador compartido cierra la app, y con el
+navegador en marcha el catálogo pide cerrarlo primero.
+
 ### Sobre el DRM
 
 YouTube, Twitch, Vimeo, Plex y Archive.org funcionan. Netflix, Prime Video y
@@ -309,11 +345,13 @@ server/
   index.js       Express: estáticos, /api/config, /api/rooms/:code/session
   hyperbeam.js   Cliente REST de Hyperbeam
   giphy.js       Búsqueda de GIFs, para que la clave no salga del servidor
-  rooms.js       Salas: presencia, chat, roles, moderación y WebSocket
+  games.js       Las reglas de los juegos: ajedrez, damas, cuatro y tres en raya
+  rooms.js       Salas: presencia, chat, roles, apps, moderación y WebSocket
 public/
   css/           reset · tokens (colores, materiales, muelles) · app
   js/
     core/        dom · icons (SVG) · api · party (socket) · store
+    apps.js      Catálogo y vistas: YouTube sincronizado, Twitch, Netflix, tableros
     main.js      La sala entera
 ```
 

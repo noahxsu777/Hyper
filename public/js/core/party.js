@@ -52,6 +52,7 @@ export function connectParty({ code, name, clientId, onEvent }) {
     sticker: (id) => send({ type: "sticker", id }),
     gif: (gif) => send({ type: "gif", url: gif.url, width: gif.width, height: gif.height }),
     audio: (patch) => send({ type: "audio", ...patch }),
+    app: (payload) => send({ type: "app", ...payload }),
     setRole: (targetId, role) => send({ type: "role", targetId, role }),
     kick: (targetId) => send({ type: "kick", targetId }),
     lock: (locked) => send({ type: "lock", locked }),

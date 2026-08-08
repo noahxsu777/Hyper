@@ -1742,3 +1742,533 @@ body {
   display: block;
   background: var(--fill-3);
 }
+
+/* ===========================================================================
+   Apps — what the screen shows when it is not the shared browser
+   =========================================================================== */
+
+/* The gallery sheet */
+
+.apps__grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: min(52dvh, 460px);
+  overflow-y: auto;
+  margin: 0 -4px;
+  padding: 0 4px;
+  text-align: left;
+}
+
+.apps__section {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--label-3);
+}
+
+.apps__tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.apps__none {
+  padding: 16px 0;
+  font-size: 13.5px;
+  color: var(--label-3);
+  text-align: center;
+}
+
+.app-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--fill-2);
+  border: 0.5px solid var(--separator);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.16s ease, transform 0.16s ease;
+}
+
+.app-tile:hover:not(:disabled) {
+  background: var(--fill);
+}
+
+.app-tile:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.app-tile:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.app-tile__mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 800;
+  flex: none;
+}
+
+.app-tile__name {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.app-tile__desc {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--label-3);
+}
+
+/* The active app, filling the same rectangle as the film */
+
+.appview {
+  position: absolute;
+  inset: 0;
+  background: #0b0b10;
+}
+
+.appview[hidden] {
+  display: none;
+}
+
+.appview__frame {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.appview__bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 0.5px solid var(--separator);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.appview__bar .app-tile__mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.appview__title {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.appview__spacer {
+  flex: 1;
+}
+
+.appview__body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.appview__player {
+  position: absolute;
+  inset: 0;
+}
+
+.appview__player > div,
+.appview__player iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+.appview__player[hidden] {
+  display: none;
+}
+
+.appview__note {
+  position: relative;
+  padding: 14px 18px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--label-2);
+  text-align: center;
+}
+
+.appview__note[hidden] {
+  display: none;
+}
+
+.appview__foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-top: 0.5px solid var(--separator);
+  background: rgba(255, 255, 255, 0.03);
+  flex-wrap: wrap;
+}
+
+.appview__foot .appview__note {
+  padding: 2px 4px;
+  flex: 1;
+  text-align: left;
+}
+
+.appview__foot input[type="range"] {
+  flex: 1;
+  min-width: 90px;
+  accent-color: var(--accent);
+}
+
+.appview__time {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--label-2);
+  white-space: nowrap;
+}
+
+.appview__pick {
+  display: flex;
+  gap: 8px;
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.appview__pick .field {
+  flex: 1;
+  min-width: 0;
+}
+
+.appview__pick .btn,
+.appview__cues .btn {
+  width: auto;
+  padding-left: 16px;
+  padding-right: 16px;
+  flex: none;
+}
+
+.appview__cues {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex: 1;
+  flex-wrap: wrap;
+}
+
+.appview__cues .field {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+/* Netflix: no player to show, so the words carry it */
+
+.appview__body--netflix {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 18px;
+  overflow-y: auto;
+  text-align: center;
+}
+
+.netflix__mark {
+  width: 54px;
+  height: 54px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  background: #e50914;
+  color: #fff;
+  font-size: 30px;
+  font-weight: 800;
+}
+
+.netflix__title {
+  font-size: 17px;
+  font-weight: 650;
+  min-height: 1em;
+}
+
+.netflix__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+  max-width: 46ch;
+  text-align: left;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--label-2);
+}
+
+/* The cue flash: 3, 2, 1, PLAY — big enough to follow from a sofa */
+
+.cue-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+
+.cue-layer[hidden] {
+  display: none;
+}
+
+.cue__text {
+  font-size: clamp(56px, 14vmin, 130px);
+  font-weight: 800;
+  letter-spacing: -2px;
+  color: #fff;
+  text-shadow: 0 12px 50px rgba(0, 0, 0, 0.8);
+  animation: cue-pop 0.35s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+@keyframes cue-pop {
+  from { transform: scale(0.5); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+/* Games: seats, status and the boards */
+
+.appview__body--game {
+  /* A query container, so the boards can size against the free rectangle. */
+  container-type: size;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.gameview__seats {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+.seat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--fill-2);
+  border: 0.5px solid var(--separator);
+}
+
+.seat__dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.seat__name {
+  font-size: 13px;
+  font-weight: 600;
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seat__name--empty {
+  color: var(--label-3);
+  font-weight: 500;
+}
+
+.gameview__vs {
+  font-size: 12px;
+  color: var(--label-3);
+}
+
+.btn--mini {
+  width: auto;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  border-radius: 999px;
+}
+
+.gameview__board {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  width: 100%;
+}
+
+.gameview__status {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--label-2);
+  min-height: 1.3em;
+  text-align: center;
+}
+
+.board {
+  display: grid;
+  gap: 5px;
+  touch-action: manipulation;
+}
+
+.board__cell {
+  border: none;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: inherit;
+}
+
+/* Tres en raya */
+
+.board--ttt {
+  grid-template-columns: repeat(3, 1fr);
+  width: min(62cqmin, 320px, 100%);
+  aspect-ratio: 1;
+}
+
+.board--ttt .board__cell {
+  border-radius: 14px;
+  background: var(--fill-2);
+  font-size: clamp(26px, 7vmin, 44px);
+  font-weight: 700;
+}
+
+.board--ttt .board__cell[data-seat="p1"] { color: var(--accent); }
+.board--ttt .board__cell[data-seat="p2"] { color: #e5484d; }
+.board--ttt .board__cell[data-win="true"] { background: rgba(124, 92, 255, 0.25); }
+.board--ttt .board__cell:disabled { cursor: default; }
+
+/* Cuatro en raya */
+
+.board--c4 {
+  grid-template-columns: repeat(7, 1fr);
+  width: min(80cqmin, 460px, 100%);
+  aspect-ratio: 7 / 6;
+  padding: 8px;
+  border-radius: 16px;
+  background: linear-gradient(160deg, #2b3aa0, #1e2a78);
+}
+
+.board__cell--c4 {
+  background: transparent;
+  border-radius: 50%;
+}
+
+.board__cell--c4 .disc {
+  width: 82%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: #10142e;
+  box-shadow: inset 0 3px 8px rgba(0, 0, 0, 0.55);
+  transition: background 0.18s ease;
+}
+
+.disc[data-seat="p1"] { background: var(--accent) !important; box-shadow: inset 0 -3px 8px rgba(0, 0, 0, 0.35); }
+.disc[data-seat="p2"] { background: #e5484d !important; box-shadow: inset 0 -3px 8px rgba(0, 0, 0, 0.35); }
+
+/* Damas y ajedrez: el tablero clásico */
+
+.board--classic {
+  grid-template-columns: repeat(8, 1fr);
+  gap: 0;
+  width: min(74cqmin, 460px, 100%);
+  aspect-ratio: 1;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 3px solid #3a3242;
+}
+
+.board__cell--classic {
+  background: #d7c4a8;
+}
+
+.board__cell--classic[data-dark="true"] {
+  background: #7d5d43;
+}
+
+.board__cell--classic[data-selected="true"] {
+  outline: 3px solid var(--accent);
+  outline-offset: -3px;
+}
+
+.disc--damas {
+  width: 72%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  position: relative;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4), inset 0 -3px 6px rgba(0, 0, 0, 0.3);
+}
+
+.disc--damas[data-king="true"]::after {
+  content: "★";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 60%;
+}
+
+.chessman {
+  font-size: clamp(20px, 5.6vmin, 40px);
+  line-height: 1;
+  user-select: none;
+}
+
+.chessman[data-color="w"] {
+  color: #f7f3ea;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+}
+
+.chessman[data-color="b"] {
+  color: #17151c;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.28);
+}
+
+/* The second road on the idle overlay */
+
+.overlay__apps {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 22px;
+  border-radius: 15px;
+  background: var(--fill);
+  color: var(--label);
+  font-size: 15px;
+  font-weight: 600;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.overlay__apps:hover {
+  background: var(--fill-2);
+}
+
+.overlay__apps:active {
+  transform: scale(0.98);
+}
