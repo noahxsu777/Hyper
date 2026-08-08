@@ -112,6 +112,22 @@ app.post("/api/rooms", (_req, res) => {
   res.json({ code: room.code })
 })
 
+/**
+ * The rooms anyone may walk into, for the landing page.
+ *
+ * Only rooms that are open in both senses: unlocked, and with someone actually
+ * in them. Busiest first, because a room with people in it is the one worth
+ * joining; ties go to whoever opened first.
+ */
+app.get("/api/rooms", (_req, res) => {
+  const rooms = hub
+    .rooms()
+    .filter((room) => room.listed)
+    .sort((a, b) => b.viewers.size - a.viewers.size || a.createdAt - b.createdAt)
+    .map((room) => room.summary())
+  res.json({ rooms })
+})
+
 /** Does this code lead anywhere, and will it let someone in? */
 app.get("/api/rooms/:code", (req, res) => {
   const room = hub.getRoom(req.params.code)

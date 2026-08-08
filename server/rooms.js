@@ -375,6 +375,30 @@ class Room {
 
   /* -------------------------------------------------------------- session */
 
+  /**
+   * What a stranger may know about this room from the landing page: enough to
+   * decide whether to walk in, and nothing else. No chat, no roster, no token.
+   */
+  summary() {
+    return {
+      code: this.code,
+      host: this.ownerViewer()?.name ?? null,
+      viewers: this.viewers.size,
+      live: Boolean(this.session),
+      openedAt: this.createdAt,
+    }
+  }
+
+  /**
+   * Whether this room belongs on a public list. A locked room is someone's
+   * private evening: it still works by code for whoever was invited, but
+   * advertising it to the whole internet is not what the lock is for. An empty
+   * room is not "open" either — it is a room being remembered.
+   */
+  get listed() {
+    return !this.locked && this.viewers.size > 0
+  }
+
   publicSession() {
     return this.session
       ? {

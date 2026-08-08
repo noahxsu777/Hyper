@@ -93,8 +93,29 @@ ni I/1, porque se dictan por teléfono) y vive por su cuenta —su gente, su cha
 su navegador compartido y sus reglas—. El enlace `tudominio/ABC123` entra
 directo.
 
-Una sala vacía se cierra sola pasado `ROOM_EMPTY_TTL_MS` y se lleva su navegador
-virtual con ella, que es lo que cuesta dinero.
+Una sala vacía se cierra sola pasado `ROOM_EMPTY_TTL_MS`; su navegador virtual
+se apaga bastante antes (`ROOM_IDLE_SESSION_MS`), porque es lo único que cuesta
+dinero.
+
+### La portada
+
+La primera pantalla pide un nombre y ofrece tres caminos: **crear una sala**,
+**entrar con un código**, o **elegir una de las salas abiertas**.
+
+La lista sale de `GET /api/rooms` y se refresca sola cada 5 segundos mientras la
+portada está a la vista, así que una sala que alguien abre ahora aparece sin
+recargar. De cada sala se ve el código, quién la lleva, cuánta gente hay dentro y
+si la película ya está en marcha.
+
+Lo que **no** sale en esa lista importa igual:
+
+- **Las salas en privado.** Poner el candado también quita la sala de la
+  portada. Sigue funcionando con su código para quien ya estaba invitado: el
+  candado es para no aparecer, no para dejar de existir.
+- **Las salas vacías.** Una sala sin nadie dentro se recuerda un rato por si su
+  gente vuelve, pero no es una sala "abierta" y no se anuncia como tal.
+- **Nada de dentro.** El listado no lleva tokens, ni el `embed_url`, ni el
+  historial del chat, ni la lista de gente: sólo lo justo para decidir si entrar.
 
 ## Anfitrión, moderadores e invitados
 

@@ -40,6 +40,9 @@ export const api = {
   /** Open a new room; resolves to its code. */
   createRoom: () => request("/api/rooms", { method: "POST" }),
 
+  /** Rooms anyone may walk into: unlocked, and with people in them. */
+  listRooms: () => request("/api/rooms"),
+
   /** Does this code lead anywhere? Resolves to null when it does not. */
   async findRoom(code) {
     try {

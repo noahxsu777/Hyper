@@ -991,6 +991,7 @@ function renderPanelBody() {
 /** A dead end: kicked, refused, or a room that no longer exists. */
 function showBlocked(title, text) {
   room.hb = null
+  stopRoomsPoll()
   els.app.hidden = true
   fill(
     els.lobby,
@@ -1661,10 +1662,68 @@ function handleRoomEvent(event) {
 }
 
 /* --------------------------------------------------------------------------
-   The lobby: no room yet
+   The landing page: no room yet
    -------------------------------------------------------------------------- */
 
-/** Everything before a room exists: open one, or type someone else's code. */
+/** Ticking while the landing page is up, so the room list stays true. */
+let roomsPoll = null
+
+function stopRoomsPoll() {
+  clearInterval(roomsPoll)
+  roomsPoll = null
+}
+
+/**
+ * The list of rooms anyone may walk into. The server decides what belongs here
+ * — a locked room is nobody's business — so this only draws what it is given.
+ */
+function renderOpenRooms(container, rooms, onPick) {
+  if (rooms === null) {
+    fill(container, h("p.rooms__empty", { text: "No se pudo cargar la lista de salas." }))
+    return
+  }
+  if (!rooms.length) {
+    fill(
+      container,
+      h("p.rooms__empty", {
+        text: "Ahora mismo no hay ninguna sala abierta. Crea la primera.",
+      }),
+    )
+    return
+  }
+
+  fill(
+    container,
+    ...rooms.map((entry) =>
+      h(
+        "button.room-card",
+        { type: "button", onClick: () => onPick(entry.code) },
+        h(
+          "div.room-card__main",
+          null,
+          h("div.room-card__code", { text: entry.code }),
+          h("div.room-card__host", {
+            // `text`, never `html`: this name was typed by a stranger.
+            text: entry.host ? `de ${entry.host}` : "sin anfitrión ahora mismo",
+          }),
+        ),
+        h(
+          "div.room-card__meta",
+          null,
+          entry.live
+            ? h("span.tag", { dataset: { tone: "ok" }, text: "EN MARCHA" })
+            : h("span.tag", { text: "ESPERANDO" }),
+          h("span.room-card__people", {
+            text: `${entry.viewers} ${entry.viewers === 1 ? "persona" : "personas"}`,
+          }),
+        ),
+        h("span.room-card__go", { html: icon("chevron-right", { size: 15 }) }),
+      ),
+    ),
+  )
+}
+
+/** Everything before a room exists: open one, pick one, or type a code. */
 function showLobby({ notice, code = "" } = {}) {
   els.app.hidden = true
   els.lobby.hidden = false
@@ -1751,26 +1810,88 @@ function showLobby({ notice, code = "" } = {}) {
     if (event.key === "Enter") joinButton.click()
   })
 
+  /** Walking into a room found on the list is the same as typing its code. */
+  const pickRoom = (wanted) => {
+    rememberName()
+    enterRoom(wanted)
+  }
+
+  const roomsList = h("div.rooms__list")
+  const roomsCount = h("span.rooms__count", { text: "" })
+
+  async function loadRooms() {
+    try {
+      const { rooms } = await api.listRooms()
+      renderOpenRooms(roomsList, rooms, pickRoom)
+      roomsCount.textContent = rooms.length
+        ? `${rooms.length} ${rooms.length === 1 ? "sala" : "salas"}`
+        : ""
+    } catch (error) {
+      console.warn("[party] no se pudo listar las salas", error)
+      renderOpenRooms(roomsList, null, pickRoom)
+      roomsCount.textContent = ""
+    }
+  }
+
   fill(
     els.lobby,
     h(
-      "div.lobby__card",
+      "div.landing",
       null,
-      h("div.lobby__mark", { html: icon("play", { size: 26 }) }),
-      h("h1.lobby__title", { text: "Watch Party" }),
-      h("p.lobby__note", {
-        text: "Un solo navegador para toda la sala. Pon una película y la veis a la vez.",
-      }),
-      nameField,
-      createButton,
-      h("div.lobby__or", null, h("span", { text: "o entra con un código" })),
-      h("div.lobby__join", null, codeField, joinButton),
-      message,
-      room.config && !room.config.configured
-        ? h("p.lobby__error", { text: room.config.error })
-        : null,
+      h(
+        "header.landing__hero",
+        null,
+        h("div.lobby__mark", { html: icon("play", { size: 26 }) }),
+        h("h1.landing__title", { text: "Watch Party" }),
+        h("p.landing__tagline", {
+          text: "Un solo navegador para toda la sala. Pon una película y la veis a la vez, en la misma pantalla y al mismo segundo.",
+        }),
+      ),
+      h(
+        "div.landing__cols",
+        null,
+        h(
+          "section.lobby__card",
+          null,
+          h("h2.card__title", { text: "Empieza aquí" }),
+          h("label.field-label", { text: "Tu nombre", for: "landingName" }),
+          nameField,
+          createButton,
+          h("div.lobby__or", null, h("span", { text: "o entra con un código" })),
+          h("div.lobby__join", null, codeField, joinButton),
+          message,
+          room.config && !room.config.configured
+            ? h("p.lobby__error", { text: room.config.error })
+            : null,
+        ),
+        h(
+          "section.lobby__card.rooms",
+          null,
+          h(
+            "div.rooms__head",
+            null,
+            h("h2.card__title", { text: "Salas abiertas" }),
+            roomsCount,
+          ),
+          h("p.rooms__note", {
+            text: "Salas con gente dentro que no están en privado. Las cerradas siguen funcionando con su código.",
+          }),
+          roomsList,
+        ),
+      ),
     ),
   )
+
+  nameField.id = "landingName"
+  renderOpenRooms(roomsList, [], pickRoom)
+  loadRooms()
+
+  // Someone opens a room while you are looking at the list, so the list has to
+  // keep up. Cheap poll, and only while this page is actually on screen.
+  stopRoomsPoll()
+  roomsPoll = setInterval(() => {
+    if (!document.hidden && !els.lobby.hidden) loadRooms()
+  }, 5000)
 
   setTimeout(() => (state.name ? codeField : nameField).focus({ preventScroll: true }), 80)
 }
@@ -1784,6 +1905,7 @@ function enterRoom(code) {
   room.code = normalizeCode(code)
   history.replaceState(null, "", `/${room.code}`)
 
+  stopRoomsPoll()
   els.lobby.hidden = true
   els.app.hidden = false
   els.app.dataset.theatre = String(Boolean(state.theatre))
