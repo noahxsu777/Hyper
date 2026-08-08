@@ -236,9 +236,10 @@ function youtubeView() {
     synced.position + (synced.playing ? (Date.now() - synced.receivedAt) / 1000 : 0)
 
   const playerHost = h("div.appview__player", null, h("div"))
-  const note = h("p.appview__note", { hidden: true })
-  const results = h("div.ytsearch", { hidden: true })
-  const body = h("div.appview__body", null, playerHost, note, results)
+  // A strip along the bottom, so it never sits on top of the message YouTube
+  // itself paints in the middle of the frame.
+  const note = h("p.appview__note.appview__note--float", { hidden: true })
+  const body = h("div.appview__body", null, playerHost, note)
   const foot = h("footer.appview__foot")
   const root = h("div.appview__frame", null, appBar("youtube"), body, foot)
 
@@ -266,7 +267,16 @@ function youtubeView() {
               player.setVolume(appVolume)
               applySync(true)
             },
-            onError: () => say("YouTube no quiere reproducir ese vídeo aquí."),
+            onError: (event) => {
+              // 101/150: the uploader forbade playing outside youtube.com.
+              // Common with music videos; the fix is picking another upload.
+              const code = Number(event?.data)
+              say(
+                code === 101 || code === 150
+                  ? "Ese vídeo no permite verse fuera de YouTube (lo decide quien lo subió). Busca otra versión."
+                  : "YouTube no quiere reproducir ese vídeo aquí. Prueba con otro.",
+              )
+            },
           },
         })
       } else if (playerId !== videoId) {
@@ -306,8 +316,9 @@ function youtubeView() {
     if (synced.playing) applySync()
   }, 750)
 
-  /* One box, two behaviours: a pasted link plays straight away, and anything
-     else is a search — the GroupTube way. The search runs through our server,
+  /* Choosing a video happens in its own sheet, never on top of the film: the
+     screen belongs to the iframe alone. One box, two behaviours — a pasted
+     link plays straight away, anything else searches through our server,
      which asks YouTube's own web API; no key of ours is involved. */
 
   const looksLikeVideo = (value) =>
@@ -315,70 +326,78 @@ function youtubeView() {
 
   const playVideo = (video) => {
     ctx.send({ action: synced.videoId ? "video" : "open", app: "youtube", video })
-    results.hidden = true
-    fill(results)
   }
 
-  async function searchVideos(query) {
-    results.hidden = false
-    fill(results, h("div.spinner"), h("p.appview__note", { text: `Buscando «${query}»…` }))
-    try {
-      const { videos } = await api.youtube(query)
-      fill(
-        results,
-        h("button.icon-btn.ytsearch__close", {
-          type: "button",
-          "aria-label": "Cerrar la búsqueda",
-          html: icon("x", { size: 16 }),
-          onClick: () => {
-            results.hidden = true
-            fill(results)
-          },
-        }),
-        videos.length === 0 ? h("p.appview__note", { text: "Nada con ese nombre." }) : null,
-        h(
-          "div.ytsearch__grid",
-          null,
-          ...videos.map((video) =>
+  function openVideoSheet() {
+    ctx.sheet((close) => {
+      const grid = h("div.ytsheet")
+      const field = h("input.field", {
+        type: "search",
+        placeholder: "Busca en YouTube o pega un enlace",
+        "aria-label": "Buscar en YouTube",
+      })
+
+      const run = async () => {
+        const value = field.value.trim()
+        if (!value) return
+        if (looksLikeVideo(value)) {
+          playVideo(value)
+          close()
+          return
+        }
+        fill(grid, h("div.spinner"), h("p.appview__note", { text: `Buscando «${value}»…` }))
+        try {
+          const { videos } = await api.youtube(value)
+          fill(
+            grid,
+            videos.length === 0 ? h("p.appview__note", { text: "Nada con ese nombre." }) : null,
             h(
-              "button.ytresult",
-              { type: "button", onClick: () => playVideo(video.id) },
-              h(
-                "span.ytresult__thumb",
-                null,
-                h("img", { src: video.thumb, alt: "", loading: "lazy" }),
-                video.duration ? h("span.ytresult__time", { text: video.duration }) : null,
+              "div.ytsearch__grid",
+              null,
+              ...videos.map((video) =>
+                h(
+                  "button.ytresult",
+                  {
+                    type: "button",
+                    onClick: () => {
+                      playVideo(video.id)
+                      close()
+                    },
+                  },
+                  h(
+                    "span.ytresult__thumb",
+                    null,
+                    h("img", { src: video.thumb, alt: "", loading: "lazy" }),
+                    video.duration ? h("span.ytresult__time", { text: video.duration }) : null,
+                  ),
+                  h("span.ytresult__title", { text: video.title }),
+                  h("span.ytresult__channel", { text: video.channel }),
+                ),
               ),
-              h("span.ytresult__title", { text: video.title }),
-              h("span.ytresult__channel", { text: video.channel }),
             ),
-          ),
-        ),
-      )
-    } catch (error) {
-      fill(
-        results,
-        h("p.appview__note", { text: `La búsqueda no funcionó: ${error.message}` }),
-        h("p.appview__note", { text: "Pegar un enlace de YouTube sigue funcionando." }),
-      )
-    }
-  }
+          )
+        } catch (error) {
+          fill(
+            grid,
+            h("p.appview__note", { text: `La búsqueda no funcionó: ${error.message}` }),
+            h("p.appview__note", { text: "Pegar un enlace de YouTube sigue funcionando." }),
+          )
+        }
+      }
 
-  const videoField = h("input.field", {
-    type: "search",
-    placeholder: "Busca en YouTube o pega un enlace",
-    "aria-label": "Buscar en YouTube",
-  })
-  const sendVideo = () => {
-    const value = videoField.value.trim()
-    if (!value) return
-    if (looksLikeVideo(value)) playVideo(value)
-    else searchVideos(value)
-    videoField.value = ""
+      field.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") run()
+      })
+      setTimeout(() => field.focus({ preventScroll: true }), 60)
+
+      return [
+        h("div.sheet__title", { text: "Elegir vídeo" }),
+        h("div.ytpick", null, field, h("button.btn", { type: "button", text: "Buscar", onClick: run })),
+        grid,
+        h("button.btn", { type: "button", dataset: { tone: "quiet" }, text: "Cerrar", onClick: close }),
+      ]
+    })
   }
-  videoField.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") sendVideo()
-  })
 
   function drawFoot() {
     if (!ctx.canModerate()) {
@@ -397,7 +416,7 @@ function youtubeView() {
       }),
       timeLabel,
       seekBar,
-      h("div.appview__pick", null, videoField, h("button.btn", { type: "button", text: "Buscar", onClick: sendVideo })),
+      h("button.btn", { type: "button", text: "Buscar vídeo", onClick: openVideoSheet }),
     )
   }
 
