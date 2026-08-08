@@ -2272,3 +2272,129 @@ body {
 .overlay__apps:active {
   transform: scale(0.98);
 }
+
+/* YouTube search: results over the player, GroupTube style */
+
+.ytsearch {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow-y: auto;
+  padding: 14px;
+  background: rgba(8, 8, 12, 0.96);
+}
+
+.ytsearch[hidden] {
+  display: none;
+}
+
+.ytsearch__close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+
+.ytsearch__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.ytresult {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 12px;
+}
+
+.ytresult:hover .ytresult__title {
+  color: var(--accent);
+}
+
+.ytresult__thumb {
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  background: var(--fill-2);
+}
+
+.ytresult__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ytresult__time {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.8);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ytresult__title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ytresult__channel {
+  font-size: 11.5px;
+  color: var(--label-3);
+}
+
+/* Netflix: room clock, linked count and the link-up panel */
+
+.netflix__state {
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--label-2);
+}
+
+.netflix__linked {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--green, #30d158);
+  min-height: 1.2em;
+}
+
+.netflix__link {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(430px, 100%);
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--fill-2);
+  border: 0.5px solid var(--separator);
+  text-align: left;
+}
+
+.netflix__link[hidden] {
+  display: none;
+}
+
+.netflix__link .appview__note {
+  padding: 0;
+  text-align: left;
+}
+
+.appview__body--netflix .btn {
+  width: auto;
+  padding-left: 18px;
+  padding-right: 18px;
+}

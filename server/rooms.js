@@ -165,6 +165,14 @@ class Room {
      */
     this.activity = null
 
+    /**
+     * Companions: browser extensions synced to this room's Netflix. They are
+     * remotes, not people — no roster entry, no chat, no seats. One of them
+     * may hold the remote control, proved with its owner's room token.
+     * @type {Map<import("ws").WebSocket, { control: { clientId: string, name: string } | null }>}
+     */
+    this.companions = new Map()
+
     this.handoverTimer = null
     this.emptyTimer = null
     this.idleSessionTimer = null
@@ -429,9 +437,9 @@ class Room {
   /* ------------------------------------------------------------ activity */
 
   /** Where the shared video actually is right now, clock included. */
-  ytPosition() {
+  livePosition() {
     const a = this.activity
-    if (!a || a.kind !== "youtube") return 0
+    if (!a || (a.kind !== "youtube" && a.kind !== "netflix")) return 0
     return Math.max(0, a.position + (a.playing ? (Date.now() - a.at) / 1000 : 0))
   }
 
@@ -445,11 +453,17 @@ class Room {
     if (!a) return null
     switch (a.kind) {
       case "youtube":
-        return { kind: "youtube", videoId: a.videoId, playing: a.playing, position: this.ytPosition() }
+        return { kind: "youtube", videoId: a.videoId, playing: a.playing, position: this.livePosition() }
       case "twitch":
         return { kind: "twitch", channel: a.channel }
       case "netflix":
-        return { kind: "netflix", title: a.title }
+        return {
+          kind: "netflix",
+          title: a.title,
+          playing: a.playing,
+          position: this.livePosition(),
+          companions: this.companions.size,
+        }
       case "game": {
         const seat = (held) => {
           if (!held) return null
@@ -465,7 +479,45 @@ class Room {
 
   setActivity(activity) {
     this.activity = activity
-    this.broadcast({ type: "activity", activity: this.publicActivity() })
+    const message = { type: "activity", activity: this.publicActivity() }
+    this.broadcast(message)
+    for (const socket of this.companions.keys()) this.send(socket, message)
+  }
+
+  /* ---------------------------------------------------------- companions */
+
+  joinCompanion(socket, controlToken) {
+    let control = null
+    if (controlToken) {
+      // The mando code is a moderator's own room token: it proves both who
+      // they are and that the room lets them drive.
+      const owner = [...this.viewers.values()].find((viewer) => viewer.token === controlToken)
+      if (owner && this.canModerate(owner.clientId)) {
+        control = { clientId: owner.clientId, name: owner.name }
+      } else {
+        this.send(socket, { type: "app-denied", reason: "Ese código de mando no vale." })
+      }
+    }
+    this.companions.set(socket, { control })
+    this.send(socket, {
+      type: "welcome-companion",
+      control: Boolean(control),
+      activity: this.publicActivity(),
+    })
+    if (this.activity) this.setActivity(this.activity) // republish the count
+  }
+
+  leaveCompanion(socket) {
+    if (this.companions.delete(socket) && this.activity) this.setActivity(this.activity)
+  }
+
+  handleCompanion(socket, payload) {
+    const entry = this.companions.get(socket)
+    if (!entry?.control || payload.type !== "app") return
+    // A companion is a remote for the video, nothing more: it cannot open or
+    // close apps, sit at games, or speak. Role checks run again inside.
+    if (!["sync", "play", "pause", "seek", "title"].includes(payload.action)) return
+    this.handleApp({ clientId: entry.control.clientId, name: entry.control.name, socket }, payload)
   }
 
   deny(socket, reason) {
@@ -499,7 +551,7 @@ class Room {
         } else if (app === "twitch") {
           this.setActivity({ kind: "twitch", channel: twitchChannel(payload.channel) })
         } else if (app === "netflix") {
-          this.setActivity({ kind: "netflix", title: "" })
+          this.setActivity({ kind: "netflix", title: "", playing: false, position: 0, at: Date.now() })
         } else if (GAMES[app]) {
           this.setActivity({ kind: "game", game: app, state: GAMES[app].create(), seats: { p1: null, p2: null } })
         } else return
@@ -526,16 +578,25 @@ class Room {
 
       case "play":
       case "pause": {
-        if (!mod || a?.kind !== "youtube") return
-        const position = this.ytPosition()
+        if (!mod || (a?.kind !== "youtube" && a?.kind !== "netflix")) return
+        const position = this.livePosition()
         this.setActivity({ ...a, playing: payload.action === "play", position, at: Date.now() })
         return
       }
 
       case "seek": {
-        if (!mod || a?.kind !== "youtube") return
+        if (!mod || (a?.kind !== "youtube" && a?.kind !== "netflix")) return
         const position = Math.min(86400, Math.max(0, Number(payload.position) || 0))
         this.setActivity({ ...a, position, at: Date.now() })
+        return
+      }
+
+      /* One event with both facts, for the extension that mirrors a real
+         player: "it is playing and it is at second N". */
+      case "sync": {
+        if (!mod || a?.kind !== "netflix") return
+        const position = Math.min(86400, Math.max(0, Number(payload.position) || 0))
+        this.setActivity({ ...a, playing: Boolean(payload.playing), position, at: Date.now() })
         return
       }
 
@@ -785,6 +846,8 @@ class Room {
     this.goodbyes.clear()
     for (const socket of this.viewers.keys()) socket.close()
     this.viewers.clear()
+    for (const socket of this.companions.keys()) socket.close()
+    this.companions.clear()
   }
 }
 
@@ -872,6 +935,24 @@ export function createRoomHub(
         return
       }
 
+      // A browser extension syncing someone's Netflix: a remote, not a person.
+      if (payload.type === "companion") {
+        const target = getRoom(payload.code)
+        if (!target) {
+          socket.send(JSON.stringify({ type: "no-room", code: normalizeCode(payload.code) }))
+          return
+        }
+        target.joinCompanion(socket, typeof payload.control === "string" ? payload.control : null)
+        room = target
+        socket.isCompanion = true
+        return
+      }
+
+      if (socket.isCompanion) {
+        room?.handleCompanion(socket, payload)
+        return
+      }
+
       if (payload.type === "join") {
         const target = getRoom(payload.code)
         if (!target) {
@@ -894,12 +975,15 @@ export function createRoomHub(
       room?.handle(socket, payload)
     })
 
-    socket.on("close", () => room?.leave(socket))
+    socket.on("close", () => {
+      if (socket.isCompanion) room?.leaveCompanion(socket)
+      else room?.leave(socket)
+    })
   })
 
   const heartbeat = setInterval(() => {
     for (const room of rooms.values()) {
-      for (const socket of room.viewers.keys()) {
+      for (const socket of [...room.viewers.keys(), ...room.companions.keys()]) {
         if (!socket.isAlive) {
           socket.terminate()
           continue

@@ -5,6 +5,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { HyperbeamClient, HyperbeamError } from "./hyperbeam.js"
 import { GiphyClient } from "./giphy.js"
+import { YouTubeClient, YouTubeError } from "./youtube.js"
 import { createRoomHub } from "./rooms.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -53,6 +54,9 @@ const MAX_ROOMS = Number(process.env.MAX_ROOMS) || 25
 /** GIFs are proxied so the key never reaches the browser. */
 const giphy = new GiphyClient(process.env.GIPHY_API_KEY)
 
+/** YouTube search for the room's synced player; no key of ours involved. */
+const youtube = new YouTubeClient({ apiUrl: process.env.YOUTUBE_API_URL || undefined })
+
 const app = express()
 app.use(express.json())
 app.disable("x-powered-by")
@@ -94,6 +98,18 @@ app.get("/api/gifs", async (req, res, next) => {
   try {
     const gifs = query ? await giphy.search(query, offset) : await giphy.trending(offset)
     res.json({ gifs })
+  } catch (err) {
+    next(err)
+  }
+})
+
+/* --------------------------------------------------------------- youtube */
+
+app.get("/api/youtube", async (req, res, next) => {
+  const query = String(req.query.q ?? "").trim().slice(0, 100)
+  if (!query) return res.json({ videos: [] })
+  try {
+    res.json({ videos: await youtube.search(query) })
   } catch (err) {
     next(err)
   }
@@ -227,6 +243,10 @@ app.get(/^\/(?!api\/|vendor\/).*/, (_req, res) => {
 })
 
 app.use((err, _req, res, _next) => {
+  if (err instanceof YouTubeError) {
+    console.error(`[youtube] ${err.message}`)
+    return res.status(err.status ?? 502).json({ error: err.message })
+  }
   if (err?.name === "GiphyError") {
     console.error(`[giphy] ${err.message}`)
     return res.status(err.status ?? 502).json({ error: err.message })

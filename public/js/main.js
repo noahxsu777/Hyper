@@ -94,6 +94,8 @@ initApps({
   send: (payload) => room.socket?.app(payload),
   canModerate,
   you: () => room.you,
+  code: () => room.code,
+  token: () => room.token,
   sheet: (build) => sheet(build),
   toast: (options) => toast(options),
   browserLive: () => Boolean(room.hb || room.starting),

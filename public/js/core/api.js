@@ -37,6 +37,9 @@ export const api = {
   gifs: (query = "", offset = 0) =>
     request(`/api/gifs?q=${encodeURIComponent(query)}&offset=${offset}`),
 
+  /** YouTube search for the synced player, proxied through our server. */
+  youtube: (query) => request(`/api/youtube?q=${encodeURIComponent(query)}`),
+
   /** Open a new room; resolves to its code. */
   createRoom: () => request("/api/rooms", { method: "POST" }),
 

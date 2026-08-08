@@ -284,22 +284,28 @@ catálogo tipo tienda: **Medios** y **Juegos**. Las apps ocupan la misma pantall
 que el navegador compartido, pero no lo usan: **no gastan minutos de Hyperbeam**
 y funcionan aunque falte la clave.
 
-- **YouTube** — reproducción sincronizada de verdad. Quien lleva la sala pega un
-  enlace; el servidor guarda el vídeo, si está en marcha y en qué segundo, y
-  cada navegador reproduce su propia copia pegada al reloj de la sala (se
-  corrige sola si se desvía más de segundo y medio). Los controles del iframe
-  van desactivados: el mando es la barra de la sala, porque un play local de un
-  invitado solo desincronizaría su copia. El servidor solo acepta **IDs de
-  vídeo**, nunca URLs: aceptar URLs convertiría la app en una forma de incrustar
-  cualquier página en la pantalla de todos.
+- **YouTube** — reproducción sincronizada de verdad, sin Hyperbeam: solo el
+  iframe oficial en cada navegador. La caja de arriba busca **y** acepta
+  enlaces: escribe algo y salen resultados con miniatura, canal y duración
+  (la búsqueda pasa por `/api/youtube`, un proxy a la API que usa la propia web
+  de YouTube — sin clave nuestra ni cuota); pega un enlace y se reproduce
+  directo. El servidor guarda el vídeo, si está en marcha y en qué segundo, y
+  cada navegador reproduce su copia pegada al reloj de la sala (se corrige sola
+  si se desvía más de segundo y medio). Los controles del iframe van
+  desactivados: el mando es la barra de la sala. El servidor solo acepta **IDs
+  de vídeo**, nunca URLs: aceptar URLs convertiría la app en una forma de
+  incrustar cualquier página en la pantalla de todos.
 - **Twitch** — todos el mismo canal; al ser directo, la sincronía la pone Twitch.
-- **Netflix (sincronizado)** — Netflix **no puede** reproducirse dentro de otra
-  web: prohíbe incrustarse y su DRM solo corre en su reproductor (Teleparty lo
-  resuelve con una extensión instalada en cada navegador, que aquí no hay). Así
-  que esta app sincroniza **a las personas**: cada uno abre Netflix con su
-  cuenta, y la sala manda la cuenta atrás y el ▶/⏸ en grande a todos a la vez.
-  Vale igual para Disney+, Prime o Max. La otra vía sigue existiendo: Netflix
-  dentro del navegador compartido, si el plan de Hyperbeam trae Widevine.
+- **Netflix (vinculado)** — Netflix **no puede** reproducirse dentro de otra
+  web: prohíbe incrustarse y su DRM solo corre en su reproductor. Lo que hacen
+  Rave (app nativa con WebView) y Teleparty (extensión) es sincronizar el
+  reproductor de **cada uno**, y esta app hace lo mismo con la extensión de la
+  carpeta **`extension/`**: cada persona abre Netflix con su cuenta, vincula la
+  pestaña pegando el enlace de la sala, y play, pausa y posición viajan solos.
+  Quien lleva la sala puede además pegar su **código de mando** (su token de
+  sala): entonces su pestaña de Netflix ES el mando, y dar al play ahí mueve el
+  de todos. Sin extensión (móviles), queda la cuenta atrás en grande de
+  siempre. Detalles e instalación en `extension/README.md`.
 - **Juegos** — cuatro en raya, tres en raya, damas y ajedrez. **Las reglas viven
   en el servidor** (`server/games.js`): un movimiento llega como intención, se
   valida contra el estado real y solo entonces se entera la sala — un navegador
@@ -345,6 +351,7 @@ server/
   index.js       Express: estáticos, /api/config, /api/rooms/:code/session
   hyperbeam.js   Cliente REST de Hyperbeam
   giphy.js       Búsqueda de GIFs, para que la clave no salga del servidor
+  youtube.js     Búsqueda de vídeos vía la API de la web de YouTube (sin clave)
   games.js       Las reglas de los juegos: ajedrez, damas, cuatro y tres en raya
   rooms.js       Salas: presencia, chat, roles, apps, moderación y WebSocket
 public/
@@ -353,6 +360,7 @@ public/
     core/        dom · icons (SVG) · api · party (socket) · store
     apps.js      Catálogo y vistas: YouTube sincronizado, Twitch, Netflix, tableros
     main.js      La sala entera
+extension/       Extensión de navegador: vincula la pestaña de Netflix a la sala
 ```
 
 ---

@@ -8,6 +8,7 @@
 
 import { fill, h } from "./core/dom.js"
 import { icon } from "./core/icons.js"
+import { api } from "./core/api.js"
 
 /* ------------------------------------------------------------- catalog */
 
@@ -236,7 +237,8 @@ function youtubeView() {
 
   const playerHost = h("div.appview__player", null, h("div"))
   const note = h("p.appview__note", { hidden: true })
-  const body = h("div.appview__body", null, playerHost, note)
+  const results = h("div.ytsearch", { hidden: true })
+  const body = h("div.appview__body", null, playerHost, note, results)
   const foot = h("footer.appview__foot")
   const root = h("div.appview__frame", null, appBar("youtube"), body, foot)
 
@@ -304,13 +306,74 @@ function youtubeView() {
     if (synced.playing) applySync()
   }, 750)
 
+  /* One box, two behaviours: a pasted link plays straight away, and anything
+     else is a search — the GroupTube way. The search runs through our server,
+     which asks YouTube's own web API; no key of ours is involved. */
+
+  const looksLikeVideo = (value) =>
+    /^[\w-]{11}$/.test(value.trim()) || /youtube\.com|youtu\.be/.test(value)
+
+  const playVideo = (video) => {
+    ctx.send({ action: synced.videoId ? "video" : "open", app: "youtube", video })
+    results.hidden = true
+    fill(results)
+  }
+
+  async function searchVideos(query) {
+    results.hidden = false
+    fill(results, h("div.spinner"), h("p.appview__note", { text: `Buscando «${query}»…` }))
+    try {
+      const { videos } = await api.youtube(query)
+      fill(
+        results,
+        h("button.icon-btn.ytsearch__close", {
+          type: "button",
+          "aria-label": "Cerrar la búsqueda",
+          html: icon("x", { size: 16 }),
+          onClick: () => {
+            results.hidden = true
+            fill(results)
+          },
+        }),
+        videos.length === 0 ? h("p.appview__note", { text: "Nada con ese nombre." }) : null,
+        h(
+          "div.ytsearch__grid",
+          null,
+          ...videos.map((video) =>
+            h(
+              "button.ytresult",
+              { type: "button", onClick: () => playVideo(video.id) },
+              h(
+                "span.ytresult__thumb",
+                null,
+                h("img", { src: video.thumb, alt: "", loading: "lazy" }),
+                video.duration ? h("span.ytresult__time", { text: video.duration }) : null,
+              ),
+              h("span.ytresult__title", { text: video.title }),
+              h("span.ytresult__channel", { text: video.channel }),
+            ),
+          ),
+        ),
+      )
+    } catch (error) {
+      fill(
+        results,
+        h("p.appview__note", { text: `La búsqueda no funcionó: ${error.message}` }),
+        h("p.appview__note", { text: "Pegar un enlace de YouTube sigue funcionando." }),
+      )
+    }
+  }
+
   const videoField = h("input.field", {
-    type: "text",
-    placeholder: "Pega un enlace de YouTube",
-    "aria-label": "Enlace de YouTube",
+    type: "search",
+    placeholder: "Busca en YouTube o pega un enlace",
+    "aria-label": "Buscar en YouTube",
   })
   const sendVideo = () => {
-    if (videoField.value.trim()) ctx.send({ action: synced.videoId ? "video" : "open", app: "youtube", video: videoField.value })
+    const value = videoField.value.trim()
+    if (!value) return
+    if (looksLikeVideo(value)) playVideo(value)
+    else searchVideos(value)
     videoField.value = ""
   }
   videoField.addEventListener("keydown", (event) => {
@@ -334,7 +397,7 @@ function youtubeView() {
       }),
       timeLabel,
       seekBar,
-      h("div.appview__pick", null, videoField, h("button.btn", { type: "button", text: "Ver", onClick: sendVideo })),
+      h("div.appview__pick", null, videoField, h("button.btn", { type: "button", text: "Buscar", onClick: sendVideo })),
     )
   }
 
@@ -349,7 +412,7 @@ function youtubeView() {
         receivedAt: Date.now(),
       }
       playerHost.hidden = !synced.videoId
-      if (!synced.videoId) say("Pega un enlace de YouTube para empezar.")
+      if (!synced.videoId) say("Busca un vídeo o pega un enlace para empezar.")
       else {
         if (!failed) say(null)
         ensurePlayer(synced.videoId).then(() => {
@@ -419,9 +482,27 @@ function twitchView() {
 
 /* -------------------------------------------------------------- netflix */
 
+const hms = (seconds) => {
+  const s = Math.max(0, Math.floor(seconds))
+  const hh = Math.floor(s / 3600)
+  const mm = Math.floor((s % 3600) / 60)
+  return `${hh ? hh + ":" : ""}${String(mm).padStart(hh ? 2 : 1, "0")}:${String(s % 60).padStart(2, "0")}`
+}
+
 function netflixView() {
   const title = h("p.netflix__title")
+  const stateLine = h("p.netflix__state")
+  const linked = h("p.netflix__linked")
   const foot = h("footer.appview__foot")
+
+  // The room's clock for Netflix, mirroring the YouTube one.
+  let synced = { playing: false, position: 0, receivedAt: Date.now() }
+  const localPosition = () =>
+    synced.position + (synced.playing ? (Date.now() - synced.receivedAt) / 1000 : 0)
+
+  const ticker = setInterval(() => {
+    stateLine.textContent = `${synced.playing ? "▶ Reproduciendo" : "⏸ En pausa"} · ${hms(localPosition())}`
+  }, 500)
 
   const titleField = h("input.field", {
     type: "text",
@@ -430,20 +511,58 @@ function netflixView() {
     onChange: () => ctx.send({ action: "title", title: titleField.value }),
   })
 
+  /**
+   * The mando code IS the moderator's own room token: it proves to the
+   * server both who the extension belongs to and that the room lets them
+   * drive. It is theirs already — showing it to them reveals nothing new.
+   */
+  const linkHelp = h("div.netflix__link", { hidden: true })
+  function drawLinkHelp() {
+    fill(
+      linkHelp,
+      h("p.appview__note", {
+        text: "Instala la extensión (carpeta extension/ del proyecto, «cargar descomprimida» en chrome://extensions) y pégale estas dos cosas:",
+      }),
+      h("label.field-label", { text: "Enlace de la sala" }),
+      h("input.field", { value: `${location.origin}/${ctx.code()}`, readonly: true, onFocus: (e) => e.target.select() }),
+      ctx.canModerate()
+        ? h("label.field-label", { text: "Código de mando (solo para ti: convierte tu Netflix en el mando)" })
+        : null,
+      ctx.canModerate()
+        ? h("input.field", { value: ctx.token() ?? "", readonly: true, onFocus: (e) => e.target.select() })
+        : null,
+      h("p.appview__note", {
+        text: "Con la extensión, tu pestaña de Netflix obedece a la sala sola: play, pausa y posición. Sin extensión, sigue la cuenta atrás a mano.",
+      }),
+    )
+  }
+
   const body = h(
     "div.appview__body.appview__body--netflix",
     null,
     h("div.netflix__mark", { text: "N" }),
     title,
+    stateLine,
+    linked,
     h(
       "ol.netflix__steps",
       null,
-      h("li", { text: "Abre Netflix en otra pestaña o en tu tele, con tu cuenta." }),
-      h("li", { text: "Pon el mismo título y déjalo pausado al principio." }),
-      h("li", { text: "Cuando la sala mande la cuenta atrás, dale al play a la vez." }),
+      h("li", { text: "Abre Netflix en otra pestaña, con tu cuenta." }),
+      h("li", { text: "Vincúlala con la extensión, o pon el mismo título y espera la señal." }),
+      h("li", { text: "Play, pausa y posición viajan solos a las pestañas vinculadas." }),
     ),
+    h("button.btn", {
+      type: "button",
+      dataset: { tone: "quiet" },
+      text: "Vincular mi Netflix",
+      onClick: () => {
+        linkHelp.hidden = !linkHelp.hidden
+        if (!linkHelp.hidden) drawLinkHelp()
+      },
+    }),
+    linkHelp,
     h("p.appview__note", {
-      text: "Netflix no deja reproducirse dentro de otras webs, así que aquí la sala sincroniza a las personas, no al vídeo. Vale igual para Disney+, Prime o Max.",
+      text: "Netflix no deja reproducirse dentro de otras webs, así que cada uno reproduce con su cuenta y la sala lleva el compás. Vale igual para Disney+, Prime o Max (la cuenta atrás; la extensión es solo Netflix).",
     }),
   )
 
@@ -452,7 +571,16 @@ function netflixView() {
   return {
     root,
     update(activity) {
+      synced = {
+        playing: Boolean(activity.playing),
+        position: Number(activity.position) || 0,
+        receivedAt: Date.now(),
+      }
       title.textContent = activity.title ? `🎬 ${activity.title}` : ""
+      const count = Number(activity.companions) || 0
+      linked.textContent = count
+        ? `📺 ${count} Netflix ${count === 1 ? "vinculado" : "vinculados"}`
+        : ""
       if (document.activeElement !== titleField) titleField.value = activity.title ?? ""
       fill(
         foot,
@@ -460,17 +588,26 @@ function netflixView() {
           ? h(
               "div.appview__cues",
               null,
+              h("button.ctrl", {
+                type: "button",
+                dataset: { primary: "true" },
+                "aria-label": synced.playing ? "Pausa para todos" : "Play para todos",
+                html: icon(synced.playing ? "pause" : "play", { size: 18 }),
+                onClick: () => ctx.send({ action: synced.playing ? "pause" : "play" }),
+              }),
               titleField,
               h("button.btn", {
                 type: "button",
                 text: "Cuenta atrás y ¡PLAY!",
                 onClick: () => ctx.send({ action: "cue", cue: "countdown" }),
               }),
-              h("button.btn", { type: "button", dataset: { tone: "quiet" }, text: "▶ Play", onClick: () => ctx.send({ action: "cue", cue: "play" }) }),
               h("button.btn", { type: "button", dataset: { tone: "quiet" }, text: "⏸ Pausa", onClick: () => ctx.send({ action: "cue", cue: "pause" }) }),
             )
-          : h("span.appview__note", { text: "Atento a la cuenta atrás: sale en grande para toda la sala." }),
+          : h("span.appview__note", { text: "Atento a la cuenta atrás — o vincula tu Netflix y déjate llevar." }),
       )
+    },
+    destroy() {
+      clearInterval(ticker)
     },
   }
 }

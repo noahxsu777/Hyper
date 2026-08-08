@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body {
+        width: 320px;
+        margin: 0;
+        padding: 16px;
+        font: 13.5px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif;
+        background: #101016;
+        color: #f2f2f6;
+      }
+      h1 { margin: 0 0 4px; font-size: 15px; }
+      p { margin: 0 0 12px; color: #9a9aa5; font-size: 12.5px; }
+      label { display: block; margin: 10px 0 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase; color: #9a9aa5; }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 9px 11px;
+        border-radius: 10px;
+        border: 1px solid #33333d;
+        background: #1a1a22;
+        color: inherit;
+        font-size: 13px;
+      }
+      button {
+        width: 100%;
+        margin-top: 14px;
+        padding: 11px;
+        border: none;
+        border-radius: 12px;
+        background: #7c5cff;
+        color: #fff;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.off { background: #2a2a33; }
+      #status { margin-top: 12px; font-size: 12.5px; color: #9a9aa5; min-height: 1.4em; }
+      #status[data-tone="on"] { color: #4ade80; }
+      #status[data-tone="error"] { color: #f87171; }
+    </style>
+  </head>
+  <body>
+    <h1>Watch Party · Netflix</h1>
+    <p>Vincula esta pestaña de Netflix con tu sala: play, pausa y posición viajan solos.</p>
+
+    <label for="link">Enlace de la sala</label>
+    <input id="link" type="url" placeholder="https://tu-app.fly.dev/ABC123" />
+
+    <label for="mando">Código de mando (opcional, solo quien lleva la sala)</label>
+    <input id="mando" type="text" placeholder="Déjalo vacío para solo seguir" />
+
+    <button id="go">Vincular</button>
+    <div id="status"></div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

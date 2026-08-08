@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Watch Party · Netflix vinculado",
+  "version": "1.0.0",
+  "description": "Sincroniza tu pestaña de Netflix con una sala de Watch Party: play, pausa y posición, cada uno con su propia cuenta.",
+  "permissions": ["storage"],
+  "host_permissions": ["*://www.netflix.com/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["*://www.netflix.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://www.netflix.com/*"],
+      "js": ["page.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Watch Party"
+  }
+}
