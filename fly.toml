@@ -28,8 +28,10 @@ primary_region = 'ams'
   # rechaza, el servidor reintenta con el agente por defecto en vez de fallar.
   HB_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15'
   # Segundos sin nadie conectado antes de que Hyperbeam apague la máquina
-  # virtual. Estaba en 60: bloquear el móvil un minuto mataba la película.
-  HB_OFFLINE_TIMEOUT = '300'
+  # virtual. Dos horas: salir a compartir el enlace o bloquear el móvil un
+  # buen rato no debe costar la película. Ojo: una sala vacía sigue gastando
+  # minutos hasta que este reloj venza.
+  HB_OFFLINE_TIMEOUT = '7200'
   # Segundos sin que nadie toque el navegador compartido antes de que Hyperbeam
   # lo apague. 0 lo desactiva, que es lo que hace falta aquí: ver una película
   # es exactamente no tocar nada durante dos horas.

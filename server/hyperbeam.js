@@ -24,9 +24,11 @@ const DEFAULTS = {
    * Aquí va en 0, que lo desactiva: quien decide cuándo se acaba es la sala.
    */
   inactiveTimeout: 0,
-  // Segundos sin nadie conectado. 60 era poco: bloquear el móvil un minuto
-  // bastaba para matar la película.
-  offlineTimeout: 300,
+  // Segundos sin nadie conectado antes de que Hyperbeam apague la máquina.
+  // Dos horas: salir de la app a compartir el enlace, o que todos bloqueen el
+  // móvil un rato, no debe costar la película. Si la API no acepta un valor
+  // tan alto, createSession baja el listón en escalera en vez de rendirse.
+  offlineTimeout: 7200,
   // Tope absoluto, por si una sala queda colgada sin que nadie la cierre.
   // Seis horas cubre cualquier película y evita que una máquina sangre minutos.
   absoluteTimeout: 6 * 60 * 60,
@@ -76,6 +78,7 @@ export class HyperbeamClient {
     // no lo sabemos antes, y decir que sí sin haberlo pedido sería mentir.
     this.activeUserAgent = null
     this.timeoutsApplied = null
+    this.activeOfflineTimeout = null
   }
 
   /** True when the configured key is a test key (limited minutes). */
@@ -130,36 +133,52 @@ export class HyperbeamClient {
       start_url: startUrl || this.startUrl,
       width: width || this.width,
       height: height || this.height,
-      // El campo suelto de siempre, por si esta cuenta aún habla la versión
-      // vieja de la API.
-      offline_timeout: this.offlineTimeout,
     }
 
-    const timeouts = {
+    const block = (offline) => ({
       timeout: {
         absolute: this.absoluteTimeout,
         inactive: this.inactiveTimeout,
-        offline: this.offlineTimeout,
+        offline,
         warning: this.warningTimeout,
       },
-    }
+    })
 
-    // Desactivar el reloj de inactividad es lo que salva la película, así que
-    // se intenta primero. Si esta cuenta no acepta el bloque `timeout`, la
-    // sesión se abre igual sin él: mejor una película que puede cortarse que
-    // ninguna. Lo que no hacemos es fingir que se aplicó.
-    try {
-      const session = await this.#createWithUserAgent({ ...base, ...timeouts })
-      this.timeoutsApplied = true
-      return session
-    } catch (err) {
-      if (!isRejection(err)) throw err
-      console.warn(`[hyperbeam] bloque timeout rechazado: ${err.message}`)
-      console.warn("[hyperbeam] La sesión puede cerrarse sola por inactividad.")
+    // Whether the API accepts two hours offline, or an hour, or the timeout
+    // block at all, is not something this project can verify from here — so
+    // the request walks down a ladder instead of guessing: the config we
+    // want, then a conservative hour, then no block. Each rung records what
+    // was actually applied; none of them pretends.
+    const offline = this.offlineTimeout
+    const clamped = Math.min(3600, offline)
+    const attempts = [
+      { body: { ...base, offline_timeout: offline, ...block(offline) }, applied: true, offline },
+    ]
+    if (clamped !== offline) {
+      attempts.push({ body: { ...base, offline_timeout: clamped, ...block(clamped) }, applied: true, offline: clamped })
     }
+    attempts.push({ body: { ...base, offline_timeout: clamped }, applied: false, offline: clamped })
+    attempts.push({ body: base, applied: false, offline: null })
 
-    this.timeoutsApplied = false
-    return this.#createWithUserAgent(base)
+    let lastError = null
+    for (const attempt of attempts) {
+      try {
+        const session = await this.#createWithUserAgent(attempt.body)
+        this.timeoutsApplied = attempt.applied
+        this.activeOfflineTimeout = attempt.offline
+        if (!attempt.applied) {
+          console.warn("[hyperbeam] La sesión abre sin el bloque timeout: puede cerrarse sola por inactividad.")
+        } else if (attempt.offline !== offline) {
+          console.warn(`[hyperbeam] offline_timeout rebajado a ${attempt.offline}s (la API rechazó ${offline}s).`)
+        }
+        return session
+      } catch (err) {
+        if (!isRejection(err)) throw err
+        lastError = err
+        console.warn(`[hyperbeam] configuración rechazada: ${err.message}; probando una más conservadora`)
+      }
+    }
+    throw lastError
   }
 
   /**

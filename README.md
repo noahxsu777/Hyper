@@ -33,14 +33,14 @@ navegador compartido. La app arranca aunque no haya clave: te dirá qué falta.
 | `HB_WIDTH` / `HB_HEIGHT` | `1280` / `720` | Resolución del navegador. 16:9, que es como son las películas. |
 | `HB_START_URL` | `https://www.google.com` | Página inicial. |
 | `HB_USER_AGENT` | (vacío) | User agent del navegador virtual. Vacío = Chrome de escritorio. |
-| `HB_OFFLINE_TIMEOUT` | `300` | Segundos sin nadie conectado antes de que la máquina virtual se apague sola. |
+| `HB_OFFLINE_TIMEOUT` | `7200` | Segundos sin nadie conectado antes de que la máquina virtual se apague. Dos horas: salir a compartir el enlace no mata la película, pero una sala vacía gasta minutos hasta que venza. |
 | `HB_INACTIVE_TIMEOUT` | `0` | Segundos sin que nadie **toque** el navegador compartido antes de apagarlo. `0` lo desactiva, que es lo que necesita una watch party. |
 | `HB_ABSOLUTE_TIMEOUT` | `21600` | Tope de vida de una sesión, en segundos. Seis horas, como red de seguridad. |
 | `GIPHY_API_KEY` | — | Clave de [developers.giphy.com](https://developers.giphy.com). Sin ella el botón de GIFs explica qué falta. |
 | `ROOM_NAME` | `Sala de cine` | Nombre que aparece arriba. |
 | `ROOM_OWNER_GRACE_MS` | `180000` | Cuánto espera la sala a un anfitrión desconectado antes de pasar el mando. |
 | `ROOM_EMPTY_TTL_MS` | `86400000` | Cuánto se recuerda una sala **vacía** (un día). Una sala con gente dentro no expira nunca. |
-| `ROOM_IDLE_SESSION_MS` | `90000` | Cuánto tarda una sala vacía en apagar su navegador virtual. Corto: esto sí cuesta minutos. |
+| `ROOM_IDLE_SESSION_MS` | `7200000` | Cuánto espera una sala vacía antes de apagar su navegador virtual (2 h). Esto sí gasta minutos mientras tanto. |
 | `MAX_ROOMS` | `25` | Salas abiertas a la vez. Cada una puede gastar minutos de Hyperbeam. |
 | `PORT` | `3000` | Puerto del servidor. |
 
@@ -94,9 +94,9 @@ su navegador compartido y sus reglas—. El enlace `tudominio/ABC123` entra
 directo.
 
 Una sala con gente dentro **no expira nunca**. Vacía, se recuerda un día
-entero (`ROOM_EMPTY_TTL_MS`) por si su gente vuelve; su navegador virtual se
-apaga mucho antes (`ROOM_IDLE_SESSION_MS`), porque es lo único que cuesta
-dinero. Al llegar a `MAX_ROOMS`, la sala vacía más antigua cede su hueco a
+entero (`ROOM_EMPTY_TTL_MS`) por si su gente vuelve; su navegador virtual
+aguanta 2 horas vacío (`ROOM_IDLE_SESSION_MS`) — salir a compartir el enlace
+no mata la película, aunque esas horas sí gastan minutos de Hyperbeam. Al llegar a `MAX_ROOMS`, la sala vacía más antigua cede su hueco a
 quien crea una nueva: los fantasmas nunca bloquean a la gente real.
 
 ### La portada
@@ -264,7 +264,10 @@ Se cortaba a media película por tres motivos distintos, todos con la misma cara
    la sesión se abre igual sin él y el servidor lo dice en ⚙ (`timeoutsApplied`)
    en vez de dar por hecho que se aplicó.
 2. **`offline_timeout` en 60 segundos.** Bloquear el móvil un minuto bastaba
-   para que Hyperbeam apagara la máquina. Ahora son 5 minutos.
+   para que Hyperbeam apagara la máquina. Ahora son 2 horas, y si la API
+   rechaza un valor tan alto el servidor baja el listón en escalera (2 h →
+   1 h → sin bloque) en vez de quedarse sin sesión; ⚙ enseña cuál aplicó
+   (`activeOfflineTimeout`).
 3. **Fly parando la máquina.** Las salas viven en la memoria del proceso: si Fly
    la paraba por falta de tráfico, desaparecían todas, y al volver salía "la
    sala ya no existe". `auto_stop_machines = 'off'` y `min_machines_running = 1`.

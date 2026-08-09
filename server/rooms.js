@@ -873,9 +873,12 @@ export function createRoomHub(
   // mientras la estén usando, ni evaporarse por irse a dormir. Es memoria, no
   // cuesta nada; el navegador virtual, que sí cuesta, tiene su propio reloj.
   const ttl = emptyTtlMs ?? 24 * 60 * 60 * 1000
-  // La máquina virtual, en cambio, se apaga en cuanto está claro que nadie la
-  // está mirando. Es lo único de esto que cuesta minutos.
-  const idleSession = idleSessionMs ?? 90 * 1000
+  // La máquina virtual espera dos horas a que alguien vuelva antes de
+  // apagarse. Salir de la app a compartir el enlace, o bloquear el móvil un
+  // buen rato, no debe costar la película. El precio es real: una sala vacía
+  // sigue gastando minutos de Hyperbeam hasta dos horas — el botón de cerrar
+  // el navegador (quien lleva la sala) sigue siendo la forma de no gastarlos.
+  const idleSession = idleSessionMs ?? 2 * 60 * 60 * 1000
 
   function newCode() {
     for (let attempt = 0; attempt < 50; attempt++) {

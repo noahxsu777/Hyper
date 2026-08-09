@@ -81,6 +81,8 @@ app.get("/api/config", (_req, res) => {
     userAgent: hyperbeam?.userAgent ?? null,
     activeUserAgent: hyperbeam?.activeUserAgent ?? null,
     inactiveTimeout: hyperbeam?.inactiveTimeout ?? null,
+    // Los segundos sin nadie conectado que la API aceptó de verdad.
+    activeOfflineTimeout: hyperbeam?.activeOfflineTimeout ?? null,
     // Null hasta la primera sesión: hasta entonces no sabemos si esta cuenta
     // acepta configurar los relojes, y la sala no debería dar por hecho que sí.
     timeoutsApplied: hyperbeam?.timeoutsApplied ?? null,
