@@ -1649,6 +1649,16 @@ function handleRoomEvent(event) {
       break
 
     case "role":
+      // Being crowned deserves more than a relabel.
+      if (event.role === "moderator" && room.role !== "moderator") {
+        toast({
+          title: "👑 Eres la reina de la sala",
+          text: "Puedes poner la película, controlarla y cuidar de la sala.",
+          glyph: "heart",
+          color: "var(--accent)",
+          duration: 5000,
+        })
+      }
       // The token is what the HTTP routes ask for; the role is what it buys.
       setRoomToken(event.token)
       room.token = event.token

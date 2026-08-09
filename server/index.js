@@ -119,9 +119,12 @@ app.get("/api/youtube", async (req, res, next) => {
 
 /** Open a new room and hand back its code. */
 app.post("/api/rooms", (_req, res) => {
+  // At the cap, an empty room nobody has used in hours yields its slot; only
+  // when every room has people in it does anyone get turned away.
+  if (hub.size >= MAX_ROOMS) hub.evictOldestEmpty()
   if (hub.size >= MAX_ROOMS) {
     return res.status(503).json({
-      error: "Hay demasiadas salas abiertas ahora mismo. Prueba en un momento.",
+      error: "Todas las salas están llenas ahora mismo. Prueba en un momento.",
     })
   }
   const room = hub.createRoom()

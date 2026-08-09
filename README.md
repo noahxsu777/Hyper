@@ -39,7 +39,7 @@ navegador compartido. La app arranca aunque no haya clave: te dirá qué falta.
 | `GIPHY_API_KEY` | — | Clave de [developers.giphy.com](https://developers.giphy.com). Sin ella el botón de GIFs explica qué falta. |
 | `ROOM_NAME` | `Sala de cine` | Nombre que aparece arriba. |
 | `ROOM_OWNER_GRACE_MS` | `180000` | Cuánto espera la sala a un anfitrión desconectado antes de pasar el mando. |
-| `ROOM_EMPTY_TTL_MS` | `900000` | Cuánto sobrevive una sala vacía antes de olvidarse. Generoso: la sala es memoria y no cuesta nada. |
+| `ROOM_EMPTY_TTL_MS` | `86400000` | Cuánto se recuerda una sala **vacía** (un día). Una sala con gente dentro no expira nunca. |
 | `ROOM_IDLE_SESSION_MS` | `90000` | Cuánto tarda una sala vacía en apagar su navegador virtual. Corto: esto sí cuesta minutos. |
 | `MAX_ROOMS` | `25` | Salas abiertas a la vez. Cada una puede gastar minutos de Hyperbeam. |
 | `PORT` | `3000` | Puerto del servidor. |
@@ -93,9 +93,11 @@ ni I/1, porque se dictan por teléfono) y vive por su cuenta —su gente, su cha
 su navegador compartido y sus reglas—. El enlace `tudominio/ABC123` entra
 directo.
 
-Una sala vacía se cierra sola pasado `ROOM_EMPTY_TTL_MS`; su navegador virtual
-se apaga bastante antes (`ROOM_IDLE_SESSION_MS`), porque es lo único que cuesta
-dinero.
+Una sala con gente dentro **no expira nunca**. Vacía, se recuerda un día
+entero (`ROOM_EMPTY_TTL_MS`) por si su gente vuelve; su navegador virtual se
+apaga mucho antes (`ROOM_IDLE_SESSION_MS`), porque es lo único que cuesta
+dinero. Al llegar a `MAX_ROOMS`, la sala vacía más antigua cede su hueco a
+quien crea una nueva: los fantasmas nunca bloquean a la gente real.
 
 ### La portada
 
@@ -112,8 +114,8 @@ Lo que **no** sale en esa lista importa igual:
 - **Las salas en privado.** Poner el candado también quita la sala de la
   portada. Sigue funcionando con su código para quien ya estaba invitado: el
   candado es para no aparecer, no para dejar de existir.
-- **Las salas vacías.** Una sala sin nadie dentro se recuerda un rato por si su
-  gente vuelve, pero no es una sala "abierta" y no se anuncia como tal.
+- **Las salas vacías.** Una sala sin nadie dentro se recuerda todo un día por
+  si su gente vuelve, pero no es una sala "abierta" y no se anuncia como tal.
 - **Nada de dentro.** El listado no lleva tokens, ni el `embed_url`, ni el
   historial del chat, ni la lista de gente: sólo lo justo para decidir si entrar.
 
@@ -270,8 +272,7 @@ Se cortaba a media película por tres motivos distintos, todos con la misma cara
 Y una sala vacía ya no se tira a los 2 minutos. Ahora son dos relojes separados,
 porque cuestan cosas distintas: el **navegador virtual** se apaga a los 90
 segundos (es lo único que gasta minutos), y la **sala** —su código, su chat,
-quién la lleva— se recuerda 15 minutos. Un túnel o un ascensor ya no borran un
-código que la gente tiene compartido.
+quién la lleva— se recuerda un día entero. Con gente dentro, no expira nunca.
 
 Pasada la gracia del anfitrión con la sala vacía, la sala queda libre: quien
 entre después la lleva. Una sala que conserva a un dueño que no está es una sala

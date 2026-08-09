@@ -177,6 +177,9 @@ class Room {
     this.emptyTimer = null
     this.idleSessionTimer = null
     this.goodbyes = new Map()
+
+    /** Since when the room has had nobody in it; null while occupied. */
+    this.emptySince = Date.now()
   }
 
   /* ------------------------------------------------------------- plumbing */
@@ -306,6 +309,7 @@ class Room {
       }
     }
     this.viewers.set(socket, viewer)
+    this.emptySince = null
 
     clearTimeout(this.emptyTimer)
     this.emptyTimer = null
@@ -357,6 +361,7 @@ class Room {
     this.goodbyes.set(viewer.clientId, goodbye)
 
     if (this.viewers.size === 0) {
+      this.emptySince = Date.now()
       // Ojo con no cancelar el relevo aquí. Una sala vacía conserva a su
       // anfitrión durante la gracia —para eso está—, pero si el reloj se para,
       // lo conserva para siempre: el siguiente que entre se encuentra una sala
@@ -395,7 +400,7 @@ class Room {
     if (role === "moderator") {
       if (this.moderators.has(target.clientId)) return
       this.moderators.add(target.clientId)
-      this.system(`${target.name} ahora es moderador`)
+      this.system(`👑 ${target.name} ahora es la reina de la sala`)
     } else {
       if (!this.moderators.has(target.clientId)) return
       this.moderators.delete(target.clientId)
@@ -863,9 +868,11 @@ export function createRoomHub(
   const rooms = new Map()
 
   const grace = ownerGraceMs ?? 3 * 60 * 1000
-  // Una sala vacía se recuerda un buen rato: un móvil bloqueado, un túnel o un
-  // ascensor no deberían borrar el código que la gente tiene compartido.
-  const ttl = emptyTtlMs ?? 15 * 60 * 1000
+  // Una sala solo muere estando vacía, y aun vacía se recuerda un día entero:
+  // el código que un grupo tiene compartido no debería caducarles nunca
+  // mientras la estén usando, ni evaporarse por irse a dormir. Es memoria, no
+  // cuesta nada; el navegador virtual, que sí cuesta, tiene su propio reloj.
+  const ttl = emptyTtlMs ?? 24 * 60 * 60 * 1000
   // La máquina virtual, en cambio, se apaga en cuanto está claro que nadie la
   // está mirando. Es lo único de esto que cuesta minutos.
   const idleSession = idleSessionMs ?? 90 * 1000
@@ -883,17 +890,35 @@ export function createRoomHub(
     return `${Date.now().toString(36).toUpperCase().slice(-CODE_LENGTH)}`
   }
 
+  function closeRoom(room) {
+    rooms.delete(room.code)
+    room.dispose()
+    onRoomClosed?.(room)
+  }
+
+  /**
+   * With empty rooms remembered for a whole day, the room cap would fill with
+   * ghosts and refuse real people. So at the cap, the emptiest-longest room
+   * yields its slot: someone who wants a room now beats a code nobody has
+   * used in hours. Rooms with people in them are never touched.
+   */
+  function evictOldestEmpty() {
+    let oldest = null
+    for (const room of rooms.values()) {
+      if (room.viewers.size > 0 || room.emptySince === null) continue
+      if (!oldest || room.emptySince < oldest.emptySince) oldest = room
+    }
+    if (oldest) closeRoom(oldest)
+    return Boolean(oldest)
+  }
+
   function createRoom() {
     const code = newCode()
     const room = new Room(code, {
       ownerGraceMs: grace,
       emptyTtlMs: ttl,
       idleSessionMs: idleSession,
-      onEmpty: (finished) => {
-        rooms.delete(finished.code)
-        finished.dispose()
-        onRoomClosed?.(finished)
-      },
+      onEmpty: closeRoom,
       onIdleSession: (idle) => onIdleSession?.(idle),
     })
     rooms.set(code, room)
@@ -999,6 +1024,7 @@ export function createRoomHub(
     createRoom,
     getRoom,
     authenticate,
+    evictOldestEmpty,
     normalizeCode,
     get size() {
       return rooms.size
