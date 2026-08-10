@@ -282,7 +282,7 @@ class Room {
   /* ----------------------------------------------------------------- join */
 
   /** @returns {{ ok: true, viewer: object } | { ok: false, reason: string }} */
-  join(socket, { name, clientId }) {
+  join(socket, { name, clientId, revived = false }) {
     if (this.banned.has(clientId)) {
       return { ok: false, reason: "Te han expulsado de esta sala." }
     }
@@ -328,6 +328,7 @@ class Room {
     this.send(socket, {
       type: "welcome",
       you: { id: viewer.id, name: viewer.name },
+      revived,
       role: this.roleOf(clientId),
       token: viewer.token,
       history: this.history,
@@ -861,7 +862,7 @@ class Room {
  */
 export function createRoomHub(
   server,
-  { path = "/ws", ownerGraceMs, emptyTtlMs, idleSessionMs, onRoomClosed, onIdleSession } = {},
+  { path = "/ws", ownerGraceMs, emptyTtlMs, idleSessionMs, maxRooms = 25, onRoomClosed, onIdleSession } = {},
 ) {
   const wss = new WebSocketServer({ server, path })
   /** @type {Map<string, Room>} */
@@ -915,8 +916,8 @@ export function createRoomHub(
     return Boolean(oldest)
   }
 
-  function createRoom() {
-    const code = newCode()
+  function createRoom(wanted = null) {
+    const code = wanted ?? newCode()
     const room = new Room(code, {
       ownerGraceMs: grace,
       emptyTtlMs: ttl,
@@ -982,16 +983,30 @@ export function createRoomHub(
       }
 
       if (payload.type === "join") {
-        const target = getRoom(payload.code)
+        const wanted = normalizeCode(payload.code)
+        let target = getRoom(wanted)
+        let revived = false
+
+        // A code never dies. If the server forgot this room — a restart, a
+        // deploy, a day empty — walking in with its code brings it back,
+        // same code, instead of "esa sala ya no existe". Memory is not the
+        // room's identity; the code people shared is.
+        if (!target && wanted.length === CODE_LENGTH) {
+          if (rooms.size >= maxRooms) evictOldestEmpty()
+          if (rooms.size < maxRooms) {
+            target = createRoom(wanted)
+            revived = true
+          }
+        }
         if (!target) {
-          socket.send(JSON.stringify({ type: "no-room", code: normalizeCode(payload.code) }))
+          socket.send(JSON.stringify({ type: "no-room", code: wanted }))
           return
         }
         const name = clean(payload.name, NAME_LIMIT) || "Invitado"
         const clientId = clean(payload.clientId, 64)
         if (!clientId) return
 
-        const result = target.join(socket, { name, clientId })
+        const result = target.join(socket, { name, clientId, revived })
         if (!result.ok) {
           socket.send(JSON.stringify({ type: "denied", reason: result.reason }))
           return
@@ -1023,11 +1038,68 @@ export function createRoomHub(
   }, 30000)
   heartbeat.unref?.()
 
+  /* ------------------------------------------------------- persistence */
+
+  /**
+   * The part of a room worth surviving a restart: its code, who runs it, its
+   * rules, and the virtual computer it may have left running. Never the
+   * sockets (dead by definition) and never the viewers' tokens.
+   */
+  function serialize() {
+    return [...rooms.values()].map((room) => ({
+      code: room.code,
+      createdAt: room.createdAt,
+      ownerClientId: room.ownerClientId,
+      moderators: [...room.moderators],
+      banned: [...room.banned],
+      locked: room.locked,
+      session: room.session,
+      emptySince: room.emptySince ?? Date.now(),
+    }))
+  }
+
+  function restore(entries) {
+    let count = 0
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      const code = normalizeCode(entry.code)
+      if (code.length !== CODE_LENGTH || rooms.has(code) || rooms.size >= maxRooms) continue
+      const room = createRoom(code)
+      room.createdAt = Number(entry.createdAt) || room.createdAt
+      room.ownerClientId = entry.ownerClientId ?? null
+      room.moderators = new Set(entry.moderators ?? [])
+      room.banned = new Set(entry.banned ?? [])
+      room.locked = Boolean(entry.locked)
+      room.session = entry.session ?? null
+      room.emptySince = Number(entry.emptySince) || Date.now()
+
+      // A restored room wakes up empty, so it gets the clocks an emptied room
+      // would have: the day-long memory, the VM idle timer if a session came
+      // back with it, and the owner grace so an absent owner frees the room.
+      room.emptyTimer = setTimeout(
+        () => room.onEmpty?.(room),
+        Math.max(60 * 1000, ttl - (Date.now() - room.emptySince)),
+      )
+      room.emptyTimer.unref?.()
+      if (room.session) {
+        room.idleSessionTimer = setTimeout(() => {
+          room.idleSessionTimer = null
+          if (room.viewers.size === 0) room.onIdleSession?.(room)
+        }, idleSession)
+        room.idleSessionTimer.unref?.()
+      }
+      if (room.ownerClientId) room.scheduleHandover()
+      count += 1
+    }
+    return count
+  }
+
   return {
     createRoom,
     getRoom,
     authenticate,
     evictOldestEmpty,
+    serialize,
+    restore,
     normalizeCode,
     get size() {
       return rooms.size

@@ -1,6 +1,7 @@
 import "dotenv/config"
 
 import express from "express"
+import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { HyperbeamClient, HyperbeamError } from "./hyperbeam.js"
@@ -279,6 +280,7 @@ const hub = createRoomHub(server, {
   ownerGraceMs: Number(process.env.ROOM_OWNER_GRACE_MS) || undefined,
   emptyTtlMs: Number(process.env.ROOM_EMPTY_TTL_MS) || undefined,
   idleSessionMs: Number(process.env.ROOM_IDLE_SESSION_MS) || undefined,
+  maxRooms: MAX_ROOMS,
   // Nadie mirando: el navegador compartido se apaga aunque la sala siga
   // existiendo. La sala es memoria; la máquina virtual son minutos.
   onIdleSession: (room) => {
@@ -290,10 +292,39 @@ const hub = createRoomHub(server, {
   },
 })
 
+/* ------------------------------------------------------------ persistence */
+/*
+ * Rooms live in memory, and memory dies with the process. The skeleton of
+ * every room — code, owner, moderators, rules, even its running session — is
+ * written to disk every few seconds and restored on boot, so a crash or a
+ * machine restart no longer greets people with "esa sala ya no existe".
+ * (A redeploy replaces the disk; for that case, a known code walks back in
+ * and revives the room by itself.)
+ */
+const STATE_FILE = process.env.ROOM_STATE_FILE || path.join(ROOT, "rooms-state.json")
+
+try {
+  const restored = hub.restore(JSON.parse(fs.readFileSync(STATE_FILE, "utf8")))
+  if (restored) console.log(`  Restauradas ${restored} salas de ${STATE_FILE}`)
+} catch {
+  /* first boot, or no state to restore */
+}
+
+function saveState() {
+  try {
+    fs.writeFileSync(STATE_FILE, JSON.stringify(hub.serialize()))
+  } catch (err) {
+    console.warn(`[salas] no se pudo guardar el estado: ${err.message}`)
+  }
+}
+setInterval(saveState, 15000).unref()
+
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, async () => {
     console.log("\nCerrando las salas y apagando los navegadores compartidos…")
     await Promise.all(hub.rooms().map((room) => terminate(room).catch(() => {})))
+    // After the terminations, so the file does not resurrect dead sessions.
+    saveState()
     hub.close()
     server.close(() => process.exit(0))
   })

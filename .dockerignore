@@ -9,3 +9,4 @@ npm-debug.log*
 .vscode/
 .idea/
 README.md
+rooms-state.json

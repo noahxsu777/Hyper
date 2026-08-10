@@ -1640,6 +1640,15 @@ function handleRoomEvent(event) {
       setRoomToken(event.token)
       if (event.audio) room.audio = event.audio
       room.activity = event.activity ?? null
+      // The server had forgotten this room and brought it back for us.
+      if (event.revived) {
+        toast({
+          title: "Sala recuperada",
+          text: "El servidor la había olvidado; se ha vuelto a abrir con el mismo código.",
+          glyph: "reload",
+          duration: 5000,
+        })
+      }
       renderTopbar()
       renderControls()
       renderPanel()
@@ -1746,8 +1755,10 @@ function handleRoomEvent(event) {
       break
 
     case "no-room":
+      // With revival in place this only happens for malformed codes or a
+      // server with every slot occupied.
       room.socket?.close()
-      showLobby({ notice: `La sala ${event.code} ya no existe.` })
+      showLobby({ notice: `No se pudo abrir la sala ${event.code}. Prueba en un momento.` })
       break
   }
 }
@@ -1883,7 +1894,15 @@ function showLobby({ notice, code = "" } = {}) {
       try {
         const found = await api.findRoom(wanted)
         if (!found) {
-          say("Esa sala no existe. Comprueba el código.")
+          // Could be a typo — or a room the server forgot. First press warns;
+          // pressing again walks in and revives the room with that code.
+          if (codeField.dataset.confirmed === wanted) {
+            rememberName()
+            enterRoom(wanted)
+            return
+          }
+          codeField.dataset.confirmed = wanted
+          say("Esa sala no existe ahora mismo. Revisa el código — o pulsa Entrar otra vez para abrirla igualmente.")
           return
         }
         if (found.locked) say("La sala está cerrada, puede que no te deje entrar.")
