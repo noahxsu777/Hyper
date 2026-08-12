@@ -38,6 +38,62 @@ body {
   display: none;
 }
 
+/* True fullscreen: only the picture. Theatre mode still shows the top bar and
+   the transport controls; this hides those too and lets the screen claim the
+   entire fullscreen surface, edge to edge, on any device — the whole point of
+   pressing the button. */
+.app[data-fullscreen="true"] {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+  grid-template-areas: "stage";
+  background: #000;
+}
+
+.app[data-fullscreen="true"] .topbar,
+.app[data-fullscreen="true"] .panel,
+.app[data-fullscreen="true"] .controls {
+  display: none;
+}
+
+.app[data-fullscreen="true"] .stage {
+  padding: 0;
+  gap: 0;
+}
+
+.app[data-fullscreen="true"] .screen {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* The only control left: a way back. Faded in, not fighting for attention. */
+.screen__exit-fullscreen {
+  position: absolute;
+  top: max(14px, env(safe-area-inset-top));
+  right: max(14px, env(safe-area-inset-right));
+  z-index: 6;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: var(--blur-thin);
+  -webkit-backdrop-filter: var(--blur-thin);
+  opacity: 0.75;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.screen__exit-fullscreen:hover,
+.screen__exit-fullscreen:focus-visible {
+  opacity: 1;
+}
+
+.app[data-fullscreen="true"] .screen__exit-fullscreen {
+  display: flex;
+}
+
 @media (max-width: 900px) {
   .app {
     grid-template-columns: 1fr;
@@ -2448,12 +2504,32 @@ body {
   display: none;
 }
 
-/* On a phone, a screen with something actually on it deserves real height;
-   the waiting screen keeps the compact card. */
+/* On a phone, a screen with something actually on it deserves real height —
+   but not a box taller than the video it shows. The container we hand
+   Hyperbeam becomes the resolution it renders at (fitToScreen resizes the VM
+   to fill it exactly), so a box much taller than 16:9 does not letterbox the
+   video — it makes the remote page render at a near-square viewport and we
+   simply see more of the surrounding page (often dark) above and below the
+   player. Matching 16:9, the shared browser's own configured aspect
+   (HB_WIDTH×HB_HEIGHT), keeps almost the whole box on the actual video. */
 @media (max-width: 900px) {
   .app[data-live="true"] .screen {
+    aspect-ratio: 16 / 9;
+    height: auto;
+    max-height: 60dvh;
+    /* Clears the idle card's 240px floor, which would otherwise clamp a
+       narrow phone's 16:9 height back open and reintroduce the black band
+       this rule exists to remove. */
+    min-height: 0;
+  }
+
+  /* Fullscreen wins the argument: no aspect ratio, no cap — the screen fills
+     whatever surface the Fullscreen API gave it. Must come after the rule
+     above to win the tie (same specificity, same media query). */
+  .app[data-fullscreen="true"] .screen {
     aspect-ratio: auto;
-    height: min(46dvh, 430px);
+    max-height: none;
+    height: 100%;
   }
 
   .appview__bar {

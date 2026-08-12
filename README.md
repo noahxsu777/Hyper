@@ -235,6 +235,27 @@ acabó usando, y si tuvo que caer al siguiente te lo dice.
 Para confirmar cuál se está usando de verdad, abre el navegador compartido en
 `whatismybrowser.com/detect/what-is-my-user-agent`.
 
+### La pantalla en el móvil
+
+La ventana del navegador compartido —la caja donde vive Hyperbeam— mide
+**16:9** en el móvil, la misma proporción con la que arranca la máquina
+virtual (`HB_WIDTH`×`HB_HEIGHT`). Antes medía más alta que ancha para
+aprovechar el hueco vertical, pero eso tiene un coste: `fitToScreen` redimensiona
+la máquina virtual exactamente al tamaño de esa caja, así que una caja
+desproporcionada hace que la página remota se renderice en una ventana casi
+cuadrada — y lo que se ve alrededor del vídeo no es "recorte", es la propia
+página (a menudo con fondo oscuro) ocupando el hueco que el vídeo no llena.
+A 16:9, ese hueco casi desaparece.
+
+**Pantalla completa** (⛶ en la barra) ya no fullscreenea toda la app con su
+barra, su chat y sus controles alrededor en miniatura: esconde los tres y dejan
+la ventana entera para la imagen, de borde a borde, con solo un botón para
+volver (arriba a la derecha, se difumina si no se usa). En Android, además
+intenta bloquear la orientación en horizontal (`screen.orientation.lock`),
+porque casi todo lo que se ve aquí es vídeo horizontal; si el contenido es
+vertical, o el navegador no admite el bloqueo, sigue funcionando — solo que
+sin el giro automático.
+
 ### El teclado del móvil
 
 Un teclado en pantalla tapa la parte de abajo de la ventana sin que la página se

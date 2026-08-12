@@ -640,6 +640,40 @@ async function toggleFullscreen() {
   }
 }
 
+/**
+ * "Solo el vídeo": the bar, the chat and the transport controls step out of
+ * the way, and the picture claims the whole fullscreen surface. What used to
+ * be "pantalla completa" only fullscreened the app shell — the browser then
+ * dutifully filled the screen with our chrome around a small video.
+ */
+function applyFullscreenState() {
+  const active = document.fullscreenElement === els.app
+  els.app.dataset.fullscreen = String(active)
+
+  const orientation = screen.orientation
+  if (active) {
+    // Most of what plays here is landscape video; a phone held upright would
+    // otherwise fullscreen into a portrait rectangle with the same wasted
+    // space this button exists to remove. Not fatal if it fails or is
+    // unsupported — a vertical video, or a browser without the API, is still
+    // a working fullscreen, just not auto-rotated.
+    orientation?.lock?.("landscape").catch(() => {})
+  } else {
+    orientation?.unlock?.()
+  }
+  // The resolution Hyperbeam renders at should match the surface it now
+  // fills — the whole device screen, not the inline card.
+  setTimeout(fitToScreen, active ? 350 : 200)
+}
+
+const exitFullscreenButton = h("button.screen__exit-fullscreen", {
+  type: "button",
+  "aria-label": "Salir de pantalla completa",
+  html: icon("collapse", { size: 17 }),
+  onClick: () => document.exitFullscreen().catch(() => {}),
+})
+els.screen.append(exitFullscreenButton)
+
 /* --------------------------------------------------------------------------
    Panel: chat and people
    -------------------------------------------------------------------------- */
@@ -1551,7 +1585,7 @@ document.addEventListener("visibilitychange", () => {
 })
 
 window.addEventListener("resize", () => fitToScreen())
-document.addEventListener("fullscreenchange", () => setTimeout(fitToScreen, 200))
+document.addEventListener("fullscreenchange", applyFullscreenState)
 
 /* --------------------------------------------------------------------------
    The on-screen keyboard
