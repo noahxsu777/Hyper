@@ -9,6 +9,12 @@
  *   owner       opens the room, runs it, hands out and takes back moderation
  *   moderator   drives the film and removes people
  *   guest       watches and talks
+ *
+ * Whoever opens the room is its creator forever, not just its first owner: if
+ * they vanish (closed tab, dead phone, a whole afternoon) someone else keeps
+ * the room running, but the moment the creator's own browser walks back in —
+ * a refresh, a reopened tab, any time later — they get the owner role back,
+ * even if it had long since passed to somebody else.
  */
 
 import { randomBytes } from "node:crypto"
@@ -150,6 +156,8 @@ class Room {
 
     /** Ownership follows the browser, not the socket: phones drop sockets constantly. */
     this.ownerClientId = null
+    /** Whoever opened the room. Unlike `ownerClientId`, this never changes hands. */
+    this.creatorClientId = null
     this.moderators = new Set()
     this.banned = new Set()
     /** A locked room lets nobody new in; the people already inside stay. */
@@ -288,7 +296,14 @@ class Room {
     }
 
     const returning = this.viewerByClientId(clientId)
-    if (this.locked && !returning && this.ownerClientId && this.ownerClientId !== clientId) {
+
+    // First one in ever creates the room, and stays its creator for good.
+    if (!this.creatorClientId) this.creatorClientId = clientId
+    const isCreator = this.creatorClientId === clientId
+
+    // A lock keeps strangers out, never the room's own creator: it is their
+    // room to walk back into even if it is currently in someone else's hands.
+    if (this.locked && !returning && !isCreator && this.ownerClientId && this.ownerClientId !== clientId) {
       return { ok: false, reason: "La sala está cerrada." }
     }
 
@@ -322,8 +337,14 @@ class Room {
       this.goodbyes.delete(clientId)
     }
 
-    // First one in owns the room; a returning owner gets it straight back.
-    if (!this.ownerClientId || this.ownerClientId === clientId) this.claimOwnership(viewer)
+    // The current owner gets it straight back on a reconnect, same as always.
+    // The creator gets it back too, even after it was handed to someone else
+    // while they were gone — that handover was only ever a stand-in.
+    const takingBackFromStandIn = isCreator && Boolean(this.ownerClientId) && this.ownerClientId !== clientId
+    if (!this.ownerClientId || this.ownerClientId === clientId || isCreator) {
+      this.claimOwnership(viewer)
+      if (takingBackFromStandIn) this.system(`${viewer.name} ha vuelto y retoma la sala`)
+    }
 
     this.send(socket, {
       type: "welcome",
@@ -1050,6 +1071,7 @@ export function createRoomHub(
       code: room.code,
       createdAt: room.createdAt,
       ownerClientId: room.ownerClientId,
+      creatorClientId: room.creatorClientId,
       moderators: [...room.moderators],
       banned: [...room.banned],
       locked: room.locked,
@@ -1066,6 +1088,9 @@ export function createRoomHub(
       const room = createRoom(code)
       room.createdAt = Number(entry.createdAt) || room.createdAt
       room.ownerClientId = entry.ownerClientId ?? null
+      // Older state files never recorded a creator; the last known owner is
+      // the closest guess, and still far better than forgetting one exists.
+      room.creatorClientId = entry.creatorClientId ?? entry.ownerClientId ?? null
       room.moderators = new Set(entry.moderators ?? [])
       room.banned = new Set(entry.banned ?? [])
       room.locked = Boolean(entry.locked)
@@ -1081,10 +1106,18 @@ export function createRoomHub(
       )
       room.emptyTimer.unref?.()
       if (room.session) {
-        room.idleSessionTimer = setTimeout(() => {
-          room.idleSessionTimer = null
-          if (room.viewers.size === 0) room.onIdleSession?.(room)
-        }, idleSession)
+        // Same accounting as `emptyTimer` just above: the room was already
+        // empty for a while before this restart, and the virtual computer
+        // does not get a fresh two hours just because the process did. A
+        // redeploy every few minutes must not add up to a machine left
+        // running — and billing — all night.
+        room.idleSessionTimer = setTimeout(
+          () => {
+            room.idleSessionTimer = null
+            if (room.viewers.size === 0) room.onIdleSession?.(room)
+          },
+          Math.max(15 * 1000, idleSession - (Date.now() - room.emptySince)),
+        )
         room.idleSessionTimer.unref?.()
       }
       if (room.ownerClientId) room.scheduleHandover()
