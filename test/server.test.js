@@ -290,12 +290,169 @@ describe("shutting down", () => {
 
       const again = tab(server, code, "ana", "Ana")
       await again.ready()
+      const history = again.events.find((e) => e.type === "welcome").history
+      assert.ok(
+        history.some((m) => m.kind === "system" && /se apagó solo porque la sala se quedó vacía/.test(m.text)),
+        "whoever comes back must be told why the browser is gone",
+      )
       await server.json(`/api/rooms/${code}/session`, { method: "POST", headers: { "x-room-token": again.token }, body: {} })
       assert.equal(hb.alive.size, 1)
       await server.stop("SIGTERM")
       assert.equal(hb.alive.size, 0, "SIGTERM must delete every running computer")
     } finally {
       await server.stop().catch(() => {})
+      await hb.close()
+    }
+  })
+})
+
+describe("the host's shutdown setting, over the wire", () => {
+  it("starts at the default, follows the owner, ignores guests and anything above the ceiling", async () => {
+    const server = await startServer({ ROOM_IDLE_SESSION_MS: "120000", ROOM_IDLE_SESSION_MAX_MS: "600000" })
+    try {
+      const { data: { code } } = await server.json("/api/rooms", { method: "POST" })
+      const host = tab(server, code, "ana", "Ana")
+      await host.ready()
+      const guest = tab(server, code, "beto", "Beto")
+      await guest.ready()
+
+      const welcome = host.events.find((e) => e.type === "welcome")
+      assert.equal(welcome.autoOffMin, 2)
+      assert.deepEqual(welcome.autoOffOptions, [1, 2, 5, 10], "options stop at the operator's 10 minute ceiling")
+
+      guest.send({ type: "autooff", minutes: 5 })
+      host.send({ type: "autooff", minutes: 30 })
+      await sleep(150)
+      const latest = () => host.events.filter((e) => e.type === "presence").at(-1)?.autoOffMin
+      assert.equal(latest() ?? 2, 2)
+
+      host.send({ type: "autooff", minutes: 5 })
+      await until(() => latest() === 5, "presence to carry the new delay")
+      guest.close()
+      host.close()
+    } finally {
+      await server.stop()
+    }
+  })
+})
+
+describe("steering the shared browser", () => {
+  const start = (server, code, t) =>
+    server.json(`/api/rooms/${code}/session`, { method: "POST", headers: { "x-room-token": t.token }, body: {} })
+  const control = (server, code, t) =>
+    server.json(`/api/rooms/${code}/session/control`, { headers: { "x-room-token": t.token } })
+
+  it("hands the admin token to the host and to moderators, and to nobody else", async () => {
+    const hb = await fakeHyperbeam()
+    const server = await startServer({ HYPERBEAM_API_KEY: "sk_test_fake", HYPERBEAM_API_URL: hb.url })
+    try {
+      const { data: { code } } = await server.json("/api/rooms", { method: "POST" })
+      const host = tab(server, code, "ana", "Ana")
+      await host.ready()
+      const guest = tab(server, code, "beto", "Beto")
+      await guest.ready()
+
+      assert.equal((await control(server, code, host)).status, 404, "no session yet")
+      await start(server, code, host)
+
+      const mine = await control(server, code, host)
+      assert.equal(mine.status, 200)
+      assert.equal(mine.data.adminToken, "adm-sess_1")
+      assert.equal(mine.data.priority, 2)
+      assert.equal(mine.headers.get("cache-control"), "no-store")
+
+      assert.equal((await control(server, code, guest)).status, 403)
+
+      // Crowning someone hands them the wheel too, one step below the host.
+      const guestId = host.viewers.find((v) => v.name === "Beto").id
+      host.send({ type: "role", targetId: guestId, role: "moderator" })
+      await until(() => guest.role === "moderator", "Beto to be crowned")
+      const theirs = await control(server, code, guest)
+      assert.equal(theirs.status, 200)
+      assert.equal(theirs.data.priority, 1)
+
+      // The token travels only through that route: never in a broadcast.
+      const everything = JSON.stringify([...host.events, ...guest.events])
+      assert.doesNotMatch(everything, /adm-sess/)
+      assert.equal((await server.json(`/api/rooms/${code}/session`)).data.controlLocked, false)
+
+      // A host who refreshes is the same person, and gets the same token back.
+      host.close()
+      await sleep(100)
+      const refreshed = tab(server, code, "ana", "Ana")
+      await refreshed.ready()
+      const again = await control(server, code, refreshed)
+      assert.equal(again.data.adminToken, "adm-sess_1")
+      assert.equal(again.data.priority, 2)
+      refreshed.close()
+      guest.close()
+    } finally {
+      await server.stop()
+      await hb.close()
+    }
+  })
+
+  it("strict control asks Hyperbeam for locked sessions, and tells the host it is on", async () => {
+    const hb = await fakeHyperbeam()
+    const server = await startServer({ HYPERBEAM_API_KEY: "sk_test_fake", HYPERBEAM_API_URL: hb.url, HB_LOCK_CONTROL: "true" })
+    try {
+      const { data: { code } } = await server.json("/api/rooms", { method: "POST" })
+      const host = tab(server, code, "ana", "Ana")
+      await host.ready()
+      const started = await start(server, code, host)
+      assert.equal(started.data.controlLocked, true)
+      assert.equal(hb.state.bodies[0].control_disable_default, true)
+      assert.equal((await control(server, code, host)).data.controlLocked, true)
+      host.close()
+    } finally {
+      await server.stop()
+      await hb.close()
+    }
+  })
+
+  it("if the API refuses strict control, the session still opens and strict mode steps aside for good", async () => {
+    const hb = await fakeHyperbeam()
+    hb.state.rejectKeys = ["control_disable_default"]
+    const server = await startServer({ HYPERBEAM_API_KEY: "sk_test_fake", HYPERBEAM_API_URL: hb.url, HB_LOCK_CONTROL: "true" })
+    try {
+      const { data: { code } } = await server.json("/api/rooms", { method: "POST" })
+      const host = tab(server, code, "ana", "Ana")
+      await host.ready()
+      const first = await start(server, code, host)
+      assert.equal(first.status, 200, "a refused flag must not cost the film")
+      assert.equal(first.data.controlLocked, false)
+      assert.match(server.log, /rechaz[óo] control_disable_default/)
+      const attemptsForFirst = hb.state.bodies.length
+
+      // The next session does not even try the flag again.
+      await server.json(`/api/rooms/${code}/session`, { method: "DELETE", headers: { "x-room-token": host.token } })
+      const bodiesBefore = hb.state.bodies.length
+      await start(server, code, host)
+      assert.ok(hb.state.bodies.slice(bodiesBefore).every((body) => !("control_disable_default" in body)))
+      assert.ok(attemptsForFirst > 1)
+      host.close()
+    } finally {
+      await server.stop()
+      await hb.close()
+    }
+  })
+
+  it("a bad key is not mistaken for a bad flag", async () => {
+    const hb = await fakeHyperbeam()
+    hb.state.failWith = { status: 401, message: "invalid key" }
+    const server = await startServer({ HYPERBEAM_API_KEY: "sk_test_fake", HYPERBEAM_API_URL: hb.url, HB_LOCK_CONTROL: "true" })
+    try {
+      const { data: { code } } = await server.json("/api/rooms", { method: "POST" })
+      const host = tab(server, code, "ana", "Ana")
+      await host.ready()
+      const res = await start(server, code, host)
+      assert.equal(res.status, 401)
+      // Strict mode stays armed: the failure said nothing about the flag.
+      hb.state.failWith = null
+      assert.equal((await start(server, code, host)).data.controlLocked, true)
+      host.close()
+    } finally {
+      await server.stop()
       await hb.close()
     }
   })

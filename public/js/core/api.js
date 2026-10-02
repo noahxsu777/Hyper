@@ -80,6 +80,19 @@ export const api = {
       headers: accessCode ? { "x-access-code": accessCode } : {},
     }),
 
+  /**
+   * The admin token and priority that let a host or moderator steer the shared
+   * browser through Hyperbeam's permissions. Resolves to null for anyone else.
+   */
+  async sessionControl(code) {
+    try {
+      return await request(`/api/rooms/${encodeURIComponent(code)}/session/control`)
+    } catch (err) {
+      if (err.status === 403 || err.status === 404 || err.status === 401) return null
+      throw err
+    }
+  },
+
   /** The room's running session, or null when there is none. */
   async getSession(code) {
     try {

@@ -2709,3 +2709,260 @@ body {
     scroll-snap-align: start;
   }
 }
+
+/* A labelled control inside a sheet, e.g. the empty-room shutdown delay. */
+.sheet__field {
+  padding: 4px 0;
+}
+
+.sheet__field .segmented {
+  margin: 0;
+}
+
+/* Six options share one row: equal columns, a hair smaller than the tabs. */
+.sheet__field .segmented button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 8px 0;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+/* ===========================================================================
+   Reactions over the screen
+   =========================================================================== */
+
+.bursts {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.bursts__item {
+  position: absolute;
+  left: var(--x);
+  bottom: 56px;
+  font-size: var(--size, 32px);
+  line-height: 1;
+  will-change: transform, opacity;
+  animation: burst-rise var(--dur, 2.6s) cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.45));
+}
+
+@keyframes burst-rise {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.4);
+  }
+  12% {
+    opacity: 1;
+    transform: translate(calc(var(--sway) * 0.2), -8px) scale(1.2);
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--sway), var(--rise)) scale(0.9);
+  }
+}
+
+/* The launcher: a small material pill in the corner that unfolds sideways. */
+.reactions {
+  position: absolute;
+  right: max(10px, env(safe-area-inset-right));
+  bottom: 10px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--material-regular);
+  backdrop-filter: var(--blur-thin);
+  -webkit-backdrop-filter: var(--blur-thin);
+  border: 0.5px solid var(--separator);
+  box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.6);
+}
+
+.reactions[hidden] {
+  display: none;
+}
+
+/* Reacting needs something on screen to react to: the idle, loading and error
+   cards own the corner (and, on a phone, the shelf of services under it). */
+.screen__overlay:not([hidden]) ~ .reactions {
+  display: none;
+}
+
+.reactions__row {
+  display: flex;
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition:
+    max-width var(--dur) var(--ease-spring),
+    opacity var(--dur-fast) var(--ease-out);
+}
+
+.reactions[data-open="true"] .reactions__row {
+  max-width: 320px;
+  opacity: 1;
+}
+
+.reactions__pick,
+.reactions__toggle {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 21px;
+  line-height: 1;
+  transition: transform var(--dur-fast) var(--ease-spring);
+}
+
+.reactions__pick:active {
+  transform: scale(1.35);
+}
+
+.reactions__toggle:active {
+  transform: scale(0.9);
+}
+
+@media (hover: hover) {
+  .reactions__pick:hover {
+    background: var(--fill-3);
+  }
+}
+
+/* ===========================================================================
+   Polls
+   =========================================================================== */
+
+.pollbar {
+  flex: none;
+  padding: 0 12px 8px;
+}
+
+.pollbar[hidden] {
+  display: none;
+}
+
+.pollbar__btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 13px;
+  border-radius: 12px;
+  background: rgba(var(--accent-rgb), 0.16);
+  color: var(--label);
+  font-size: 13.5px;
+  font-weight: 600;
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.pollbar__btn:active {
+  background: rgba(var(--accent-rgb), 0.28);
+}
+
+.pollbar__q {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pollbar__meta {
+  flex: none;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--label-2);
+}
+
+.pollsheet {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pollform {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pollopts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* An option is its own progress bar: the fill grows with the share of votes. */
+.pollopt {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 0 14px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--fill-3);
+  color: var(--label);
+  font-size: 15px;
+  font-weight: 500;
+  text-align: left;
+}
+
+.pollopt[disabled] {
+  opacity: 1;
+  cursor: default;
+}
+
+.pollopt__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--pct, 0%);
+  background: rgba(var(--accent-rgb), 0.28);
+  transition: width var(--dur) var(--ease-spring);
+}
+
+.pollopt[data-mine="true"] .pollopt__fill,
+.pollopt[data-lead="true"] .pollopt__fill {
+  background: rgba(var(--accent-rgb), 0.5);
+}
+
+.pollopt__label {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pollopt__check {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--accent-soft);
+}
+
+.pollopt__pct {
+  position: relative;
+  flex: none;
+  min-width: 2.6em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--label-2);
+}
+
+.pollopt[data-lead="true"] .pollopt__label {
+  font-weight: 700;
+}

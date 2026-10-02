@@ -39,17 +39,36 @@ export async function until(check, message, timeout = 5000) {
 /** Hyperbeam stand-in. `alive` is the set of virtual computers still billing. */
 export async function fakeHyperbeam() {
   const alive = new Set()
-  const state = { created: 0, failWith: null }
+  // `bodies` keeps what each create request asked for; `rejectKeys` makes the
+  // fake refuse (400) any request that carries one of those parameters.
+  const state = { created: 0, failWith: null, bodies: [], rejectKeys: [] }
   const server = http.createServer((req, res) => {
     res.setHeader("content-type", "application/json")
     if (req.method === "POST" && req.url === "/v0/vm") {
-      if (state.failWith) {
-        res.statusCode = state.failWith.status
-        return res.end(JSON.stringify({ error: state.failWith.message }))
-      }
-      const id = `sess_${++state.created}`
-      alive.add(id)
-      return res.end(JSON.stringify({ session_id: id, embed_url: `https://fake.invalid/${id}`, admin_token: "x" }))
+      let raw = ""
+      req.on("data", (chunk) => (raw += chunk))
+      req.on("end", () => {
+        let body = {}
+        try {
+          body = JSON.parse(raw || "{}")
+        } catch {
+          /* an empty body is fine */
+        }
+        state.bodies.push(body)
+        if (state.failWith) {
+          res.statusCode = state.failWith.status
+          return res.end(JSON.stringify({ error: state.failWith.message }))
+        }
+        const refused = state.rejectKeys.find((key) => key in body)
+        if (refused) {
+          res.statusCode = 400
+          return res.end(JSON.stringify({ error: `unknown parameter ${refused}` }))
+        }
+        const id = `sess_${++state.created}`
+        alive.add(id)
+        res.end(JSON.stringify({ session_id: id, embed_url: `https://fake.invalid/${id}`, admin_token: `adm-${id}` }))
+      })
+      return
     }
     const match = req.url.match(/^\/v0\/vm\/([^/]+)$/)
     if (match && req.method === "DELETE") {

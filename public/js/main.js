@@ -57,6 +57,10 @@ const room = {
   messages: [],
   tab: "chat",
   hb: null,
+  /** Hyperbeam's admin token and priority for this attach, if we run the room. */
+  control: null,
+  /** Whether the stream currently lets us steer. */
+  mayControl: false,
   starting: false,
   currentUrl: "",
   /** Stickers the server allows, delivered on join. */
@@ -180,9 +184,9 @@ function brandMark(className, size) {
 function renderTopbar() {
   const live = room.hb ? "true" : room.starting ? "connecting" : "false"
   const statusText = room.hb
-    ? "Navegador compartido en marcha"
+    ? "En marcha"
     : room.status === "connected"
-      ? "Listo para empezar"
+      ? "Listo"
       : room.status === "reconnecting"
         ? "Reconectando…"
         : "Conectando…"
@@ -706,6 +710,225 @@ const composerSend = h("button.composer__send", {
   html: icon("send", { size: 17, stroke: 1.9 }),
 })
 
+/* ---- reactions over the screen -------------------------------------------- */
+
+/** The few stickers that sit one tap away on the screen itself. */
+const REACTION_IDS = ["popcorn", "lol", "heart", "fire", "clap", "shock"]
+
+const burstLayer = h("div.bursts", { "aria-hidden": "true" })
+const reactionDock = h("div.reactions", { dataset: { open: "false" } })
+let reactionCollapse = null
+
+function setReactionsOpen(open) {
+  clearTimeout(reactionCollapse)
+  reactionDock.dataset.open = String(open)
+  reactionDock.querySelector(".reactions__toggle")?.setAttribute("aria-expanded", String(open))
+  // It folds itself away: the screen is for watching.
+  if (open) reactionCollapse = setTimeout(() => setReactionsOpen(false), 5000)
+}
+
+function renderReactionDock() {
+  const picks = REACTION_IDS.map((id) => room.stickers.find((sticker) => sticker.id === id)).filter(Boolean)
+  fill(
+    reactionDock,
+    h(
+      "div.reactions__row",
+      null,
+      ...picks.map((sticker) =>
+        h("button.reactions__pick", {
+          type: "button",
+          text: sticker.char,
+          "aria-label": `Reaccionar con ${sticker.id}`,
+          onClick: () => {
+            room.socket?.burst(sticker.id)
+            setReactionsOpen(true)
+          },
+        }),
+      ),
+    ),
+    h("button.reactions__toggle", {
+      type: "button",
+      text: "😊",
+      "aria-label": "Reacciones",
+      "aria-expanded": "false",
+      onClick: () => setReactionsOpen(reactionDock.dataset.open !== "true"),
+    }),
+  )
+  reactionDock.hidden = picks.length === 0
+}
+
+/** One emoji drifting up the screen, wherever it came from. */
+function floatReaction({ char }) {
+  // A hidden tab would queue every animation and release them all at once.
+  if (document.hidden || !char) return
+  while (burstLayer.childElementCount >= 40) burstLayer.firstElementChild.remove()
+  const height = els.screen.clientHeight || 400
+  const node = h("span.bursts__item", { text: char })
+  node.style.setProperty("--x", `${8 + Math.random() * 84}%`)
+  node.style.setProperty("--size", `${26 + Math.round(Math.random() * 18)}px`)
+  node.style.setProperty("--sway", `${Math.round(Math.random() * 60 - 30)}px`)
+  node.style.setProperty("--rise", `${-Math.round(height * (0.55 + Math.random() * 0.3))}px`)
+  node.style.setProperty("--dur", `${(2.2 + Math.random() * 1).toFixed(2)}s`)
+  node.addEventListener("animationend", () => node.remove())
+  burstLayer.append(node)
+}
+
+/* ---- polls ---------------------------------------------------------------- */
+
+const pollBar = h("div.pollbar", { hidden: true })
+/** The sheet's body while it is open, so a vote elsewhere refreshes it live. */
+let pollBody = null
+
+function renderPollBar() {
+  const poll = room.poll
+  // A guest sees the bar only while there is something to vote on.
+  pollBar.hidden = room.tab !== "chat" || (!poll && !canModerate())
+  if (pollBar.hidden) return
+  fill(
+    pollBar,
+    poll
+      ? h(
+          "button.pollbar__btn",
+          { type: "button", onClick: openPollSheet },
+          h("span.pollbar__q", { text: `🗳️ ${poll.question}` }),
+          h("span.pollbar__meta", {
+            text: !poll.open
+              ? "Cerrada · ver resultado"
+              : poll.mine
+                ? `${poll.total} ${poll.total === 1 ? "voto" : "votos"} · ya votaste`
+                : `${poll.total} ${poll.total === 1 ? "voto" : "votos"} · vota`,
+          }),
+        )
+      : h("button.pollbar__btn", { type: "button", onClick: openPollSheet }, h("span.pollbar__q", { text: "🗳️ Crear una votación" })),
+  )
+}
+
+function openPollSheet() {
+  pollBody = h("div.pollsheet")
+  drawPollSheet()
+  sheet(() => [pollBody])
+}
+
+/** A vote or a close from anyone redraws the sheet, if it is still on screen. */
+function fillPollSheet() {
+  if (pollBody?.isConnected) drawPollSheet()
+}
+
+function drawPollSheet() {
+  const poll = room.poll
+  const closeSheet = () => pollBody.closest(".sheet")?.remove()
+
+  if (!poll) {
+    if (!canModerate()) {
+      return fill(
+        pollBody,
+        h("div.sheet__title", { text: "Votación" }),
+        h("div.sheet__text", { text: "Ahora mismo no hay ninguna votación abierta." }),
+        h("button.btn", { type: "button", dataset: { tone: "quiet" }, text: "Cerrar", onClick: closeSheet }),
+      )
+    }
+    return fill(pollBody, ...pollForm(closeSheet))
+  }
+
+  const top = Math.max(...poll.options.map((option) => option.votes))
+  fill(
+    pollBody,
+    h("div.sheet__title", { text: poll.question }),
+    h("div.sheet__text", {
+      text: `${poll.open ? "Abierta" : "Cerrada"} por ${poll.by} · ${poll.total} ${poll.total === 1 ? "voto" : "votos"}`,
+    }),
+    h(
+      "div.pollopts",
+      null,
+      ...poll.options.map((option) => {
+        const pct = poll.total ? Math.round((option.votes / poll.total) * 100) : 0
+        const node = h(
+          "button.pollopt",
+          {
+            type: "button",
+            disabled: !poll.open,
+            dataset: { mine: String(poll.mine === option.id), lead: String(!poll.open && top > 0 && option.votes === top) },
+            "aria-pressed": String(poll.mine === option.id),
+            onClick: () => room.socket?.pollVote(option.id),
+          },
+          h("span.pollopt__fill"),
+          h("span.pollopt__label", { text: option.text }),
+          poll.mine === option.id ? h("span.pollopt__check", { html: icon("check", { size: 15, stroke: 2.4 }) }) : null,
+          h("span.pollopt__pct", { text: poll.total ? `${pct}%` : "" }),
+        )
+        node.style.setProperty("--pct", `${pct}%`)
+        return node
+      }),
+    ),
+    canModerate() && poll.open
+      ? h("button.btn", { type: "button", text: "Cerrar la votación", onClick: () => room.socket?.pollClose() })
+      : null,
+    canModerate()
+      ? h("button.btn", {
+          type: "button",
+          dataset: { tone: "quiet" },
+          text: poll.open ? "Quitar la votación" : "Quitar y crear otra",
+          onClick: () => room.socket?.pollClear(),
+        })
+      : null,
+    h("button.btn", { type: "button", dataset: { tone: "quiet" }, text: "Cerrar", onClick: closeSheet }),
+  )
+}
+
+/** Question and up to six options; two to start, a third and on as they are needed. */
+function pollForm(closeSheet) {
+  const question = h("input.field", {
+    type: "text",
+    placeholder: "¿Qué vemos?",
+    maxlength: "120",
+    "aria-label": "Pregunta",
+  })
+  const optionFields = []
+  const list = h("div.pollform")
+  const addOption = () => {
+    if (optionFields.length >= 6) return
+    const field = h("input.field", {
+      type: "text",
+      placeholder: `Opción ${optionFields.length + 1}`,
+      maxlength: "60",
+      "aria-label": `Opción ${optionFields.length + 1}`,
+    })
+    optionFields.push(field)
+    list.append(field)
+    more.hidden = optionFields.length >= 6
+  }
+  const more = h("button.btn", { type: "button", dataset: { tone: "quiet" }, text: "Añadir otra opción", onClick: addOption })
+  const note = h("p.lobby__error", { hidden: true })
+
+  addOption()
+  addOption()
+  setTimeout(() => question.focus({ preventScroll: true }), 120)
+
+  return [
+    h("div.sheet__title", { text: "Nueva votación" }),
+    h("div.sheet__text", { text: "Todos votan una vez y pueden cambiar su voto mientras esté abierta." }),
+    question,
+    list,
+    more,
+    note,
+    h("button.btn", {
+      type: "button",
+      text: "Abrir la votación",
+      onClick: () => {
+        const options = optionFields.map((field) => field.value.trim()).filter(Boolean)
+        const distinct = new Set(options.map((text) => text.toLowerCase()))
+        if (!question.value.trim() || distinct.size < 2) {
+          note.textContent = "Escribe la pregunta y al menos dos opciones distintas."
+          note.hidden = false
+          return
+        }
+        room.socket?.pollOpen(question.value.trim(), options)
+      },
+    }),
+    h("button.btn", { type: "button", dataset: { tone: "quiet" }, text: "Cancelar", onClick: closeSheet }),
+  ]
+}
+
 /* ---- stickers ------------------------------------------------------------ */
 
 const stickerPicker = h("div.popover.popover--stickers", { hidden: true })
@@ -978,8 +1201,9 @@ function renderPanel() {
     ),
   )
 
-  fill(els.panel, segmented, panelBody, effectLayer, composer)
+  fill(els.panel, segmented, pollBar, panelBody, effectLayer, composer)
   composer.hidden = room.tab !== "chat"
+  renderPollBar()
   renderPanelBody()
 }
 
@@ -1326,10 +1550,75 @@ async function reattach() {
   }
 }
 
+/**
+ * Take the wheel through Hyperbeam's own permission system. Harmless when the
+ * session was opened without strict control (everyone may steer anyway), and
+ * what makes it work when it was: guests start locked out, and each host or
+ * moderator lifts the lock for themselves with the admin token.
+ */
+async function claimControl() {
+  const hb = room.hb
+  const control = room.control
+  if (!hb || !control?.adminToken || typeof hb.setPermissions !== "function") return
+  try {
+    const ok = await hb.setPermissions(hb.userId, {
+      control_disabled: false,
+      priority: control.priority ?? 1,
+      idle_timeout: 5000,
+    })
+    if (ok === false) console.warn("[party] Hyperbeam no concedió el control")
+  } catch (error) {
+    console.warn("[party] no se pudo reclamar el control", error)
+  }
+}
+
+/** Let go of the wheel, and of the token that could take it back. */
+async function releaseControl() {
+  const hb = room.hb
+  const had = room.control
+  room.control = null
+  if (!hb || !had?.adminToken) return
+  try {
+    await hb.setPermissions(hb.userId, { control_disabled: true, priority: 0, idle_timeout: 0 })
+  } catch {
+    /* the local switch below already stopped our own input */
+  }
+  hb.adminToken = undefined
+}
+
+/**
+ * The role can change while the stream is up (crowned, or dethroned): the
+ * stream's rights follow it. Presence events arrive constantly, so the
+ * permission calls only happen when the answer to "may I steer?" changes.
+ */
+async function syncStreamRole() {
+  const hb = room.hb
+  if (!hb) return
+  const may = canModerate()
+  hb.disableInput = !may
+  if (room.mayControl === may) return
+  room.mayControl = may
+
+  if (!may) return releaseControl()
+  room.control = await api.sessionControl(room.code).catch(() => null)
+  if (room.hb === hb && room.control?.adminToken) {
+    hb.adminToken = room.control.adminToken
+    claimControl()
+  }
+}
+
 async function attach(Hyperbeam, session) {
   showLoading("Conectando con el vídeo…")
 
+  // Whoever runs the room holds Hyperbeam's admin token for the session. The
+  // server gives it back to the same person on every attach — it recognises
+  // them by their browser, not by this page load — which is what keeps the
+  // host at the wheel after a refresh.
+  const control = canModerate() ? await api.sessionControl(room.code).catch(() => null) : null
+  room.control = control
+
   room.hb = await Hyperbeam(els.mount, session.embedUrl, {
+    ...(control?.adminToken ? { adminToken: control.adminToken } : {}),
     volume: state.muted ? 0 : state.volume,
     // We forward keys ourselves so typing in the chat never leaks into the film.
     delegateKeyboard: true,
@@ -1395,6 +1684,8 @@ async function attach(Hyperbeam, session) {
 
   // A guest watches: their clicks and keys never reach the shared browser.
   room.hb.disableInput = !canModerate()
+  room.mayControl = canModerate()
+  if (room.mayControl) claimControl()
   room.connection = "playing"
   clearTimeout(stallTimer)
   els.badge.hidden = true
@@ -1565,6 +1856,37 @@ async function openSettings() {
               box.addEventListener("change", () => room.socket?.lock(box.checked))
               return box
             })(),
+          )
+        : null,
+      isOwner() && room.autoOffOptions?.length
+        ? h(
+            "div.sheet__field",
+            null,
+            h("span", { text: "Apagar el navegador si la sala queda vacía", style: { display: "block", fontWeight: "600" } }),
+            h("span", {
+              text: "Un navegador compartido gasta minutos aunque nadie lo mire. Con la sala vacía se apaga solo pasado este tiempo.",
+              style: { display: "block", fontSize: "12.5px", color: "var(--label-2)", margin: "2px 0 8px" },
+            }),
+            h(
+              "div.segmented",
+              null,
+              ...room.autoOffOptions.map((minutes) =>
+                h("button", {
+                  type: "button",
+                  text: minutes >= 60 ? "1 h" : `${minutes} min`,
+                  dataset: { active: String(minutes === room.autoOffMin) },
+                  onClick: () => {
+                    room.socket?.autoOff(minutes)
+                    dismiss()
+                    toast({
+                      title: "Apagado automático",
+                      text: `Con la sala vacía, el navegador se apaga a los ${minutes} min.`,
+                      glyph: "timer",
+                    })
+                  },
+                }),
+              ),
+            ),
           )
         : null,
       config?.testKey
@@ -1754,6 +2076,9 @@ function handleRoomEvent(event) {
       room.commands = event.commands ?? []
       room.code = event.code ?? room.code
       room.locked = Boolean(event.locked)
+      room.autoOffMin = event.autoOffMin ?? null
+      room.autoOffOptions = event.autoOffOptions ?? []
+      room.poll = event.poll ?? null
       room.ownerId = event.ownerId ?? null
       room.role = event.role ?? "guest"
       room.token = event.token
@@ -1769,6 +2094,7 @@ function handleRoomEvent(event) {
           duration: 5000,
         })
       }
+      renderReactionDock()
       renderTopbar()
       renderControls()
       renderPanel()
@@ -1793,7 +2119,7 @@ function handleRoomEvent(event) {
       room.token = event.token
       room.role = event.role
       room.ownerId = event.ownerId ?? room.ownerId
-      if (room.hb) room.hb.disableInput = !canModerate()
+      syncStreamRole()
       renderTopbar()
       renderControls()
       renderPanel()
@@ -1804,8 +2130,9 @@ function handleRoomEvent(event) {
       room.viewers = event.viewers
       room.ownerId = event.ownerId ?? room.ownerId
       room.locked = Boolean(event.locked)
+      room.autoOffMin = event.autoOffMin ?? room.autoOffMin
       room.role = room.viewers.find((viewer) => viewer.id === room.you?.id)?.role ?? room.role
-      if (room.hb) room.hb.disableInput = !canModerate()
+      syncStreamRole()
       renderTopbar()
       renderControls()
       renderPanel()
@@ -1826,6 +2153,22 @@ function handleRoomEvent(event) {
     case "effect":
       playEffect(event)
       break
+
+    case "burst":
+      floatReaction(event)
+      break
+
+    case "poll": {
+      const before = room.poll
+      room.poll = event.poll
+      // A vote you did not start deserves a nudge; your own does not.
+      if (event.poll?.open && event.poll.id !== before?.id && event.poll.by !== room.you?.name) {
+        toast({ title: "🗳️ Nueva votación", text: event.poll.question, glyph: "users", duration: 5000 })
+      }
+      renderPollBar()
+      fillPollSheet()
+      break
+    }
 
     case "activity":
       room.activity = event.activity
@@ -2156,6 +2499,7 @@ function enterRoom(code) {
   els.app.hidden = false
   els.app.dataset.theatre = String(Boolean(state.theatre))
   els.stage.append(volumePopover)
+  els.screen.append(burstLayer, reactionDock)
   els.controls.hidden = false
 
   renderControls()

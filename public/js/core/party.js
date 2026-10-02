@@ -56,6 +56,12 @@ export function connectParty({ code, name, clientId, onEvent }) {
     setRole: (targetId, role) => send({ type: "role", targetId, role }),
     kick: (targetId) => send({ type: "kick", targetId }),
     lock: (locked) => send({ type: "lock", locked }),
+    autoOff: (minutes) => send({ type: "autooff", minutes }),
+    burst: (id) => send({ type: "burst", id }),
+    pollOpen: (question, options) => send({ type: "poll-open", question, options }),
+    pollVote: (optionId) => send({ type: "poll-vote", optionId }),
+    pollClose: () => send({ type: "poll-close" }),
+    pollClear: () => send({ type: "poll-clear" }),
     rename(next) {
       currentName = next
       send({ type: "rename", name: next })

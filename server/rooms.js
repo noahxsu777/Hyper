@@ -32,6 +32,19 @@ const CODE_LENGTH = 6
 const CHAT_RATE = { burst: 5, perSecond: 1 }
 /** Every message of any kind; generous, it only stops machine-speed floods. */
 const SOCKET_RATE = { burst: 60, perSecond: 30 }
+/** Floating reactions: a handful at once, then a few a second. */
+const BURST_RATE = { burst: 10, perSecond: 5 }
+
+/**
+ * How long an EMPTY room keeps its shared browser, in minutes. The host picks
+ * one of these; the operator's ceiling (a virtual computer is billed by the
+ * minute) removes the ones that are too long.
+ */
+const AUTO_OFF_MINUTES = [1, 2, 5, 10, 15, 30, 60]
+
+const POLL_QUESTION_LIMIT = 120
+const POLL_OPTION_LIMIT = 60
+const POLL_MAX_OPTIONS = 6
 /** No O/0 or I/1: these codes get read aloud and typed on phones. */
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
@@ -144,13 +157,15 @@ function twitchChannel(value) {
  * One party.
  */
 class Room {
-  constructor(code, { ownerGraceMs, emptyTtlMs, idleSessionMs, maxViewers, onEmpty, onIdleSession }) {
+  constructor(code, { ownerGraceMs, emptyTtlMs, idleSessionMs, maxIdleSessionMs, maxViewers, onEmpty, onIdleSession }) {
     this.code = code
     this.maxViewers = maxViewers
     this.createdAt = Date.now()
     this.ownerGraceMs = ownerGraceMs
     this.emptyTtlMs = emptyTtlMs
-    this.idleSessionMs = idleSessionMs
+    /** What this room's empty-browser clock is set to; the host can change it. */
+    this.autoOffMs = idleSessionMs
+    this.maxAutoOffMs = maxIdleSessionMs ?? idleSessionMs
     this.onEmpty = onEmpty
     this.onIdleSession = onIdleSession
 
@@ -189,6 +204,9 @@ class Room {
      * @type {Map<import("ws").WebSocket, { control: { clientId: string, name: string } | null }>}
      */
     this.companions = new Map()
+
+    /** The room's current vote, if any. Lives in memory like the chat. */
+    this.poll = null
 
     this.handoverTimer = null
     this.emptyTimer = null
@@ -244,7 +262,23 @@ class Room {
       locked: this.locked,
       ownerId: this.ownerViewer()?.id ?? null,
       viewers: this.roster(),
+      autoOffMin: Math.round(this.autoOffMs / 60000),
     }
+  }
+
+  /** The delays the host may choose from, cut at the operator's ceiling. */
+  autoOffOptions() {
+    return AUTO_OFF_MINUTES.filter((minutes) => minutes * 60000 <= this.maxAutoOffMs)
+  }
+
+  setAutoOff(actorClientId, minutes) {
+    // It decides how long the operator's money keeps running: the owner's call.
+    if (this.roleOf(actorClientId) !== "owner") return
+    const wanted = Number(minutes)
+    if (!this.autoOffOptions().includes(wanted)) return
+    if (wanted * 60000 === this.autoOffMs) return
+    this.autoOffMs = wanted * 60000
+    this.announce()
   }
 
   announce() {
@@ -334,6 +368,7 @@ class Room {
         joinedAt: Date.now(),
         token: secret(),
         chatBucket: {},
+        burstBucket: {},
         socket,
       }
     }
@@ -368,6 +403,8 @@ class Room {
       token: viewer.token,
       history: this.history,
       stickers: STICKERS,
+      autoOffOptions: this.autoOffOptions(),
+      poll: this.publicPoll(clientId),
       commands: COMMANDS.map(({ command, label }) => ({ command, label })),
       audio: this.audio,
       session: this.publicSession(),
@@ -415,7 +452,7 @@ class Room {
       this.idleSessionTimer = setTimeout(() => {
         this.idleSessionTimer = null
         if (this.viewers.size === 0) this.onIdleSession?.(this)
-      }, this.idleSessionMs)
+      }, this.autoOffMs)
       this.idleSessionTimer.unref?.()
 
       this.emptyTimer = setTimeout(() => this.onEmpty?.(this), this.emptyTtlMs)
@@ -755,6 +792,7 @@ class Room {
           sessionId: this.session.session_id,
           embedUrl: this.session.embed_url,
           createdAt: this.session.created_at,
+          controlLocked: Boolean(this.session.control_locked),
         }
       : null
   }
@@ -767,11 +805,101 @@ class Room {
     this.system("Se ha abierto el navegador de la sala")
   }
 
-  clearSession() {
+  clearSession(reason = "closed") {
     if (!this.session) return
     this.session = null
     this.broadcast({ type: "session", session: null })
-    this.system("Se ha cerrado el navegador de la sala")
+    // Whoever comes back later reads this in the history, so it says why.
+    this.system(
+      {
+        idle: "El navegador compartido se apagó solo porque la sala se quedó vacía. Ábrelo otra vez cuando quieras.",
+        shutdown: "El navegador compartido se apagó porque el servidor se reinició.",
+      }[reason] ?? "Se ha cerrado el navegador de la sala",
+    )
+  }
+
+  /* ----------------------------------------------------------------- polls */
+
+  /** The poll as one person sees it: counts for everyone, and their own pick. */
+  publicPoll(clientId) {
+    const poll = this.poll
+    if (!poll) return null
+    const counts = new Map(poll.options.map((option) => [option.id, 0]))
+    for (const optionId of poll.votes.values()) counts.set(optionId, (counts.get(optionId) ?? 0) + 1)
+    return {
+      id: poll.id,
+      question: poll.question,
+      open: poll.open,
+      by: poll.by,
+      total: poll.votes.size,
+      mine: poll.votes.get(clientId) ?? null,
+      options: poll.options.map((option) => ({ id: option.id, text: option.text, votes: counts.get(option.id) ?? 0 })),
+    }
+  }
+
+  broadcastPoll() {
+    for (const viewer of this.viewers.values()) {
+      this.send(viewer.socket, { type: "poll", poll: this.publicPoll(viewer.clientId) })
+    }
+  }
+
+  openPoll(viewer, payload) {
+    if (!this.canModerate(viewer.clientId)) {
+      return this.deny(viewer.socket, "Solo quien lleva la sala puede abrir una votación.")
+    }
+    const question = clean(payload.question, POLL_QUESTION_LIMIT)
+    const seen = new Set()
+    const options = (Array.isArray(payload.options) ? payload.options : [])
+      .map((option) => clean(option, POLL_OPTION_LIMIT))
+      .filter((option) => {
+        const key = option.toLowerCase()
+        if (!option || seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+      .slice(0, POLL_MAX_OPTIONS)
+    if (!question || options.length < 2) {
+      return this.deny(viewer.socket, "Una votación necesita una pregunta y al menos dos opciones distintas.")
+    }
+    this.poll = {
+      id: `p${this.nextId++}`,
+      question,
+      options: options.map((text, index) => ({ id: `o${index + 1}`, text })),
+      votes: new Map(),
+      open: true,
+      by: viewer.name,
+    }
+    this.system(`🗳️ ${viewer.name} ha abierto una votación: ${question}`)
+    this.broadcastPoll()
+  }
+
+  votePoll(viewer, optionId) {
+    const poll = this.poll
+    if (!poll?.open || !poll.options.some((option) => option.id === optionId)) return
+    poll.votes.set(viewer.clientId, optionId)
+    this.broadcastPoll()
+  }
+
+  closePoll(viewer) {
+    if (!this.canModerate(viewer.clientId) || !this.poll?.open) return
+    this.poll.open = false
+    const result = this.publicPoll(null)
+    const top = Math.max(...result.options.map((option) => option.votes))
+    const winners = result.options.filter((option) => option.votes === top)
+    this.system(
+      top === 0
+        ? `🗳️ Votación cerrada: nadie votó (${result.question})`
+        : winners.length === 1
+          ? `🗳️ Votación cerrada: gana «${winners[0].text}» con ${top} ${top === 1 ? "voto" : "votos"}`
+          : `🗳️ Votación cerrada: empate entre ${winners.map((option) => `«${option.text}»`).join(" y ")} con ${top} ${top === 1 ? "voto" : "votos"}`,
+    )
+    this.broadcastPoll()
+  }
+
+  clearPoll(viewer) {
+    if (!this.canModerate(viewer.clientId) || !this.poll) return
+    this.poll = null
+    this.broadcastPoll()
   }
 
   /* -------------------------------------------------------------- messages */
@@ -843,6 +971,35 @@ class Room {
         this.handleApp(viewer, payload)
         return
 
+      case "burst": {
+        // A reaction over the screen, for everyone. Only the stickers the
+        // server knows can fly, and only as fast as one person can tap.
+        const sticker = STICKER_BY_ID.get(String(payload.id))
+        if (!sticker || !takeToken((viewer.burstBucket ??= {}), BURST_RATE)) return
+        this.broadcast({ type: "burst", id: sticker.id, char: sticker.char, by: viewer.id })
+        return
+      }
+
+      case "poll-open":
+        this.openPoll(viewer, payload)
+        return
+
+      case "poll-vote":
+        this.votePoll(viewer, String(payload.optionId))
+        return
+
+      case "poll-close":
+        this.closePoll(viewer)
+        return
+
+      case "poll-clear":
+        this.clearPoll(viewer)
+        return
+
+      case "autooff":
+        this.setAutoOff(viewer.clientId, payload.minutes)
+        return
+
       case "audio": {
         // The film's volume belongs to whoever is running the room.
         if (!this.canModerate(viewer.clientId)) return
@@ -912,6 +1069,7 @@ export function createRoomHub(
     ownerGraceMs,
     emptyTtlMs,
     idleSessionMs,
+    maxIdleSessionMs,
     maxRooms = 25,
     maxViewersPerRoom = 50,
     maxSocketsPerIp = 30,
@@ -936,12 +1094,12 @@ export function createRoomHub(
   // mientras la estén usando, ni evaporarse por irse a dormir. Es memoria, no
   // cuesta nada; el navegador virtual, que sí cuesta, tiene su propio reloj.
   const ttl = emptyTtlMs ?? 24 * 60 * 60 * 1000
-  // La máquina virtual espera dos horas a que alguien vuelva antes de
-  // apagarse. Salir de la app a compartir el enlace, o bloquear el móvil un
-  // buen rato, no debe costar la película. El precio es real: una sala vacía
-  // sigue gastando minutos de Hyperbeam hasta dos horas — el botón de cerrar
-  // el navegador (quien lleva la sala) sigue siendo la forma de no gastarlos.
-  const idleSession = idleSessionMs ?? 2 * 60 * 60 * 1000
+  // La máquina virtual se factura por minuto, así que una sala vacía la apaga
+  // enseguida: dos minutos dan para un refresco, un túnel o un bloqueo de
+  // pantalla corto, y ya no se pagan horas por un navegador que nadie mira.
+  // Quien lleva la sala puede alargarlo desde Ajustes, hasta el tope.
+  const maxIdleSession = Math.max(maxIdleSessionMs ?? 30 * 60 * 1000, idleSessionMs ?? 0)
+  const idleSession = Math.min(idleSessionMs ?? 2 * 60 * 1000, maxIdleSession)
 
   function newCode() {
     for (let attempt = 0; attempt < 50; attempt++) {
@@ -984,6 +1142,7 @@ export function createRoomHub(
       ownerGraceMs: grace,
       emptyTtlMs: ttl,
       idleSessionMs: idleSession,
+      maxIdleSessionMs: maxIdleSession,
       maxViewers: maxViewersPerRoom,
       onEmpty: closeRoom,
       onIdleSession: (idle) => onIdleSession?.(idle),
@@ -1135,6 +1294,7 @@ export function createRoomHub(
       banned: [...room.banned],
       locked: room.locked,
       customer: room.customer,
+      autoOffMs: room.autoOffMs,
       session: room.session,
       emptySince: room.emptySince ?? Date.now(),
     }))
@@ -1155,6 +1315,10 @@ export function createRoomHub(
       room.banned = new Set(entry.banned ?? [])
       room.locked = Boolean(entry.locked)
       room.customer = entry.customer ?? null
+      // Only a value the host could have chosen: a hand-edited state file
+      // must not be a way around the operator's ceiling.
+      const savedAutoOff = Number(entry.autoOffMs) / 60000
+      if (room.autoOffOptions().includes(savedAutoOff)) room.autoOffMs = savedAutoOff * 60000
       room.session = entry.session ?? null
       room.emptySince = Number(entry.emptySince) || Date.now()
 
@@ -1177,7 +1341,7 @@ export function createRoomHub(
             room.idleSessionTimer = null
             if (room.viewers.size === 0) room.onIdleSession?.(room)
           },
-          Math.max(15 * 1000, idleSession - (Date.now() - room.emptySince)),
+          Math.max(15 * 1000, room.autoOffMs - (Date.now() - room.emptySince)),
         )
         room.idleSessionTimer.unref?.()
       }

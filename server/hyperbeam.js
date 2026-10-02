@@ -24,11 +24,12 @@ const DEFAULTS = {
    * Aquí va en 0, que lo desactiva: quien decide cuándo se acaba es la sala.
    */
   inactiveTimeout: 0,
-  // Segundos sin nadie conectado antes de que Hyperbeam apague la máquina.
-  // Dos horas: salir de la app a compartir el enlace, o que todos bloqueen el
-  // móvil un rato, no debe costar la película. Si la API no acepta un valor
-  // tan alto, createSession baja el listón en escalera en vez de rendirse.
-  offlineTimeout: 7200,
+  // Segundos sin nadie conectado antes de que Hyperbeam apague la máquina. Es
+  // la red de seguridad por si el servidor muere sin limpiar: quien apaga la
+  // máquina de una sala vacía es la propia sala (unos minutos). index.js
+  // calcula el valor real a partir del tope de esa espera. Si la API no acepta
+  // el valor, createSession baja el listón en escalera en vez de rendirse.
+  offlineTimeout: 1860,
   // Tope absoluto, por si una sala queda colgada sin que nadie la cierre.
   // Seis horas cubre cualquier película y evita que una máquina sangre minutos.
   absoluteTimeout: 6 * 60 * 60,
@@ -73,6 +74,17 @@ export class HyperbeamClient {
     // Left unset by default: `user_agent` is only sent when asked for, so an
     // unsupported value can never break a session nobody opted into.
     this.userAgent = config.userAgent || null
+
+    // Strict control: sessions start with nobody allowed to steer, and the
+    // people running the room (who hold the session's admin token) grant it to
+    // themselves. Without it, who may steer is only enforced by this app's own
+    // page, which anyone with developer tools could switch off. Off by default
+    // because it depends on the API accepting `control_disable_default`, which
+    // this project cannot check from here.
+    this.lockControl = Boolean(config.lockControl)
+    // Null until a session shows whether the API took it.
+    this.controlLockApplied = null
+    this.controlLockSupported = null
 
     // Lo que la API acabó aceptando. Null hasta que se abre la primera sesión:
     // no lo sabemos antes, y decir que sí sin haberlo pedido sería mentir.
@@ -126,13 +138,39 @@ export class HyperbeamClient {
 
   /**
    * Start a virtual computer.
-   * Resolves to `{ session_id, embed_url, admin_token }`.
+   * Resolves to `{ session_id, embed_url, admin_token, control_locked }`.
    */
-  async createSession({ startUrl, width, height } = {}) {
+  async createSession(options = {}) {
+    if (!this.lockControl || this.controlLockSupported === false) {
+      return { ...(await this.#createLadder(options)), control_locked: false }
+    }
+
+    try {
+      const session = await this.#createLadder(options, { control_disable_default: true })
+      this.controlLockSupported = true
+      this.controlLockApplied = true
+      return { ...session, control_locked: true }
+    } catch (err) {
+      if (!isRejection(err)) throw err
+      // Every rung refused. Is the flag to blame, or is it something else
+      // (a bad key, a bad start URL)? Only a session that opens without it
+      // tells the two apart, and that session is the one we wanted anyway.
+      const session = await this.#createLadder(options)
+      this.controlLockSupported = false
+      this.controlLockApplied = false
+      console.warn(
+        `[hyperbeam] La API rechazó control_disable_default (${err.message}); el mando se aplica solo en la página. HB_LOCK_CONTROL queda sin efecto.`,
+      )
+      return { ...session, control_locked: false }
+    }
+  }
+
+  async #createLadder({ startUrl, width, height } = {}, extra = {}) {
     const base = {
       start_url: startUrl || this.startUrl,
       width: width || this.width,
       height: height || this.height,
+      ...extra,
     }
 
     const block = (offline) => ({

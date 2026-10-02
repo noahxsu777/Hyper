@@ -33,14 +33,16 @@ navegador compartido. La app arranca aunque no haya clave: te dirá qué falta.
 | `HB_WIDTH` / `HB_HEIGHT` | `1280` / `720` | Resolución del navegador. 16:9, que es como son las películas. |
 | `HB_START_URL` | `https://www.google.com` | Página inicial. |
 | `HB_USER_AGENT` | (vacío) | User agent del navegador virtual. Vacío = Chrome de escritorio. |
-| `HB_OFFLINE_TIMEOUT` | `7200` | Segundos sin nadie conectado antes de que la máquina virtual se apague. Dos horas: salir a compartir el enlace no mata la película, pero una sala vacía gasta minutos hasta que venza. |
+| `HB_OFFLINE_TIMEOUT` | tope + 60 s (`1860`) | Red de seguridad de Hyperbeam: segundos sin nadie conectado antes de apagar la máquina si el servidor muere sin limpiar. El apagado normal de una sala vacía lo hace la sala (ver [Apagado automático](#apagado-automático)). No lo bajes del tope o recortarás lo que elija el anfitrión. |
+| `HB_LOCK_CONTROL` | (apagado) | `true` pide a Hyperbeam sesiones donde nadie puede manejar hasta que el anfitrión se lo concede (ver [El mando](#el-mando-del-navegador-compartido)). |
 | `HB_INACTIVE_TIMEOUT` | `0` | Segundos sin que nadie **toque** el navegador compartido antes de apagarlo. `0` lo desactiva, que es lo que necesita una watch party. |
 | `HB_ABSOLUTE_TIMEOUT` | `21600` | Tope de vida de una sesión, en segundos. Seis horas, como red de seguridad. |
 | `GIPHY_API_KEY` | — | Clave de [developers.giphy.com](https://developers.giphy.com). Sin ella el botón de GIFs explica qué falta. |
 | `ROOM_NAME` | `Sala de cine` | Nombre que aparece arriba. |
 | `ROOM_OWNER_GRACE_MS` | `180000` | Cuánto espera la sala a un anfitrión desconectado antes de pasar el mando. |
 | `ROOM_EMPTY_TTL_MS` | `86400000` | Cuánto se recuerda una sala **vacía** (un día). Una sala con gente dentro no expira nunca. |
-| `ROOM_IDLE_SESSION_MS` | `7200000` | Cuánto espera una sala vacía antes de apagar su navegador virtual (2 h). Esto sí gasta minutos mientras tanto. |
+| `ROOM_IDLE_SESSION_MS` | `120000` | Cuánto espera una sala **vacía** antes de apagar su navegador virtual (2 min). El anfitrión puede cambiarlo en Ajustes. |
+| `ROOM_IDLE_SESSION_MAX_MS` | `1800000` | Lo máximo que el anfitrión puede elegir (30 min): el techo del operador sobre lo que cuesta una sala vacía. |
 | `MAX_ROOMS` | `25` | Salas abiertas a la vez. Cada una puede gastar minutos de Hyperbeam. |
 | `PORT` | `3000` | Puerto del servidor. |
 
@@ -235,10 +237,35 @@ su navegador compartido y sus reglas—. El enlace `tudominio/ABC123` entra
 directo.
 
 Una sala con gente dentro **no expira nunca**. Vacía, se recuerda un día
-entero (`ROOM_EMPTY_TTL_MS`) por si su gente vuelve; su navegador virtual
-aguanta 2 horas vacío (`ROOM_IDLE_SESSION_MS`) — salir a compartir el enlace
-no mata la película, aunque esas horas sí gastan minutos de Hyperbeam. Al llegar a `MAX_ROOMS`, la sala vacía más antigua cede su hueco a
-quien crea una nueva: los fantasmas nunca bloquean a la gente real.
+entero (`ROOM_EMPTY_TTL_MS`) por si su gente vuelve, pero su navegador virtual
+**se apaga solo a los 2 minutos** (ver [Apagado automático](#apagado-automático)):
+la sala es memoria y no cuesta nada; la máquina se factura por minuto. Al llegar
+a `MAX_ROOMS`, la sala vacía más antigua cede su hueco a quien crea una nueva:
+los fantasmas nunca bloquean a la gente real.
+
+### Apagado automático
+
+Si **nadie queda en la sala**, el navegador compartido se apaga solo y deja de
+gastar minutos. Por defecto, a los 2 minutos: lo justo para un refresco, un
+túnel o un bloqueo de pantalla corto.
+
+- El **anfitrión** lo cambia en ⚙ Ajustes → *Apagar el navegador si la sala
+  queda vacía* (1, 2, 5, 10, 15 o 30 min). Es del anfitrión porque decide cuánto
+  dinero sigue corriendo.
+- El **operador** pone el techo con `ROOM_IDLE_SESSION_MAX_MS` (30 min por
+  defecto): las opciones por encima no aparecen, y un archivo de estado editado
+  a mano tampoco puede saltárselo.
+- Quien vuelve después lo ve en el chat: *«El navegador compartido se apagó solo
+  porque la sala se quedó vacía. Ábrelo otra vez cuando quieras.»*
+- Si el servidor se reinicia con una sala ya vacía, el reloj cuenta lo que esa
+  sala ya llevaba vacía, no empieza de cero.
+- La red de seguridad es el `offline_timeout` de Hyperbeam: lo calcula el
+  servidor a partir del techo (+1 min) para que nunca recorte la elección del
+  anfitrión.
+
+El precio de un valor corto es real: quien salga a compartir el enlace y tarde
+más del tiempo elegido encuentra el navegador cerrado (la sala, el chat y los
+roles siguen). Si tu gente suele pausar películas largas, súbelo en Ajustes.
 
 ### La portada
 
@@ -274,6 +301,9 @@ pantalla y hablan por el chat.
 | Controlar la película y el volumen de la sala | ✓ | ✓ | |
 | Expulsar invitados | ✓ | ✓ | |
 | Nombrar moderadores | ✓ | | |
+| Abrir y cerrar votaciones | ✓ | ✓ | |
+| Votar y reaccionar | ✓ | ✓ | ✓ |
+| Elegir el apagado automático de la sala vacía | ✓ | | |
 | Cerrar la sala | ✓ | | |
 
 Un moderador no puede expulsar a otro moderador, y nadie puede tocar al
@@ -295,15 +325,53 @@ anfitrión, apareces una sola vez en la lista y el chat no se llena de "ha salid
 / se ha unido" (el aviso de salida espera 15 s por si vuelves).
 
 Si el anfitrión desaparece de verdad, la sala espera `ROOM_OWNER_GRACE_MS`
-(3 minutos por defecto) antes de pasar el mando a quien lleve más tiempo dentro.
-Y si no queda nadie, la sala se libera: quien llegue después empieza de cero, en
-vez de quedarse bloqueado esperando a alguien que no va a volver.
+(3 minutos por defecto) antes de pasar el mando a quien lleve más tiempo dentro,
+**como suplente**: quien creó la sala sigue siendo su creador para siempre. En
+cuanto vuelva desde su navegador —un minuto o un día después, aunque la sala esté
+cerrada— recupera el mando y el suplente vuelve a invitado (el chat avisa:
+*«Ana ha vuelto y retoma la sala»*). Y si no queda nadie, la sala se libera:
+quien llegue después empieza de cero, en vez de quedarse bloqueado esperando a
+alguien que no va a volver.
 
-> Lo que **no** está blindado: un invitado con las herramientas de desarrollo
-> abiertas podría devolverse el control local sobre el vídeo. Bloquearlo de
-> verdad requiere la API de permisos de Hyperbeam con el `admin_token` en el
-> navegador del anfitrión, y este proyecto no ha podido probarla. Para ver una
-> película con amigos, lo que hay sobra.
+Esto se apoya en el identificador que guarda el navegador. Quien borre los datos
+del sitio o entre desde otro dispositivo es, para la sala, otra persona.
+
+### El mando del navegador compartido
+
+Hyperbeam tiene su propio sistema de permisos: cada sesión nace con un
+`admin_token`, y quien lo presenta puede decidir quién maneja. Esta app lo usa
+así:
+
+- El servidor **solo entrega el token al anfitrión y a los moderadores**
+  (`GET /api/rooms/:code/session/control`, con el secreto de sala). Nunca va en
+  la sesión pública, ni en el mensaje de bienvenida, ni en ningún aviso a la sala.
+- Al conectarse al navegador, el cliente de un anfitrión pasa ese token a
+  Hyperbeam y **reclama el mando** (`setPermissions`) con la prioridad más alta:
+  2 el anfitrión, 1 los moderadores.
+- **Refrescar no lo pierde.** La sala conoce al anfitrión por su navegador, no
+  por su conexión, así que al recargar recupera el token y vuelve a reclamar el
+  mando. No se abre otra máquina: se reengancha a la que ya había.
+- Si nombras moderador a alguien con el navegador abierto, recibe el token y el
+  mando al momento, sin recargar. Si se lo quitas, suelta el mando y el token.
+- Un invitado conecta sin token, con la entrada desactivada, y nunca pide control.
+
+**Modo estricto (`HB_LOCK_CONTROL=true`).** Por defecto, todo el que está conectado
+puede manejar a nivel de Hyperbeam y es esta página la que se lo impide a los
+invitados (`disableInput`): suficiente para ver una película con amigos, pero un
+invitado con las herramientas de desarrollo podría saltárselo. Con el modo
+estricto la sesión se abre con `control_disable_default: true`: nadie maneja
+hasta que el anfitrión o un moderador se lo concede, y eso lo hace cumplir
+Hyperbeam, no la página.
+
+> **Sin verificar contra la API real.** Este proyecto no ha podido probar contra
+> Hyperbeam ni el parámetro `control_disable_default` ni la semántica exacta de
+> `setPermissions` (`priority`, `idle_timeout`), así que está apagado por defecto.
+> Si la API rechaza el parámetro, la sesión se abre igual sin él, el log lo dice
+> y no se vuelve a intentar. Pruébalo con tu cuenta antes de confiar en él: abre
+> una sala, entra con un invitado y comprueba que no puede manejar. Una cosa más:
+> un moderador degradado suelta el token en su navegador, pero uno malintencionado
+> lo habría copiado; reiniciar el navegador compartido (una sesión nueva) lo
+> invalida.
 
 ---
 
@@ -352,6 +420,20 @@ vez de quedarse bloqueado esperando a alguien que no va a volver.
    llega al navegador. Al enviar, la sala solo acepta URLs de `giphy.com`, así
    que ese endpoint no sirve para meter imágenes de cualquier sitio en el chat
    ajeno.
+10. **Reacciones sobre la pantalla.** El botón 😊 de la esquina de la pantalla
+    despliega seis emojis (🍿 😂 ❤️ 🔥 👏 😱); al tocar uno sube flotando por la
+    pantalla de **todos**, también sobre el navegador compartido o un juego, y
+    se pliega solo a los 5 s. Solo vuelan los stickers de la lista del servidor,
+    y cada persona puede lanzar unos 5 por segundo (ráfaga de 10): no hay forma
+    de inundar la pantalla de los demás. No dejan rastro en el chat.
+11. **Votaciones.** El anfitrión y los moderadores abren una desde la barra
+    *🗳️ Crear una votación* del chat: una pregunta y de 2 a 6 opciones (las
+    repetidas y las vacías se descartan). Todos votan **una vez** y pueden
+    cambiar su voto mientras esté abierta; el resultado se actualiza en directo
+    en las hojas abiertas. Quien la abre la cierra con *Cerrar la votación* y el
+    chat anuncia el ganador (o el empate, o que nadie votó). Los votos son
+    anónimos: se ven los recuentos, no quién votó qué. Viven en memoria, como el
+    chat.
 
 ### El user agent del navegador compartido
 
@@ -426,10 +508,11 @@ Se cortaba a media película por tres motivos distintos, todos con la misma cara
    la sesión se abre igual sin él y el servidor lo dice en ⚙ (`timeoutsApplied`)
    en vez de dar por hecho que se aplicó.
 2. **`offline_timeout` en 60 segundos.** Bloquear el móvil un minuto bastaba
-   para que Hyperbeam apagara la máquina. Ahora son 2 horas, y si la API
-   rechaza un valor tan alto el servidor baja el listón en escalera (2 h →
-   1 h → sin bloque) en vez de quedarse sin sesión; ⚙ enseña cuál aplicó
-   (`activeOfflineTimeout`).
+   para que Hyperbeam apagara la máquina. Ahora la red de seguridad de
+   Hyperbeam es el tope de apagado + 1 min, y si la API rechaza ese valor el
+   servidor baja el listón en escalera (→ 1 h → sin bloque) en vez de quedarse
+   sin sesión; ⚙ enseña cuál aplicó (`activeOfflineTimeout`). El apagado de una
+   sala vacía lo decide la sala, no ese reloj.
 3. **Fly parando la máquina.** Las salas viven en la memoria del proceso: si Fly
    la paraba por falta de tráfico, desaparecían todas, y al volver salía "la
    sala ya no existe". `auto_stop_machines = 'off'` y `min_machines_running = 1`.

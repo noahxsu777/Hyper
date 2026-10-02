@@ -20,17 +20,29 @@ const PORT = Number(process.env.PORT) || 3000
 /** In production the browser gets friendly messages; the details go to the log. */
 const PRODUCTION = process.env.NODE_ENV === "production"
 
+/**
+ * The longest an EMPTY room may keep its shared browser, whatever its host
+ * picks in Settings. The room's default is 2 minutes (ROOM_IDLE_SESSION_MS).
+ */
+const MAX_IDLE_SESSION_MS = Number(process.env.ROOM_IDLE_SESSION_MAX_MS) || 30 * 60 * 1000
+
 const config = {
   apiKey: process.env.HYPERBEAM_API_KEY,
   apiUrl: process.env.HYPERBEAM_API_URL,
   width: Number(process.env.HB_WIDTH) || undefined,
   height: Number(process.env.HB_HEIGHT) || undefined,
   startUrl: process.env.HB_START_URL,
-  offlineTimeout: process.env.HB_OFFLINE_TIMEOUT ? Number(process.env.HB_OFFLINE_TIMEOUT) : undefined,
+  // Hyperbeam's own "nobody is connected" clock is the backstop for a server
+  // that dies without cleaning up. It must not be shorter than the longest
+  // delay a host can choose, or that choice would be cut short from outside.
+  offlineTimeout: process.env.HB_OFFLINE_TIMEOUT
+    ? Number(process.env.HB_OFFLINE_TIMEOUT)
+    : Math.ceil(MAX_IDLE_SESSION_MS / 1000) + 60,
   // 0 desactiva el reloj de inactividad, que es lo que cortaba las películas.
   inactiveTimeout: process.env.HB_INACTIVE_TIMEOUT ? Number(process.env.HB_INACTIVE_TIMEOUT) : undefined,
   absoluteTimeout: process.env.HB_ABSOLUTE_TIMEOUT ? Number(process.env.HB_ABSOLUTE_TIMEOUT) : undefined,
   userAgent: process.env.HB_USER_AGENT,
+  lockControl: ["1", "true"].includes(String(process.env.HB_LOCK_CONTROL).toLowerCase()),
 }
 
 // Fly (and most hosts) set an app name in the environment. Telling someone on
@@ -183,6 +195,9 @@ app.get("/api/config", (_req, res) => {
       // Null hasta la primera sesión: hasta entonces no sabemos si esta cuenta
       // acepta configurar los relojes, y la sala no debería dar por hecho que sí.
       timeoutsApplied: hyperbeam?.timeoutsApplied ?? null,
+      // Whether strict control is asked for, and whether the API took it.
+      lockControl: hyperbeam?.lockControl ?? false,
+      controlLockApplied: hyperbeam?.controlLockApplied ?? null,
     })
   }
   res.json(body)
@@ -279,6 +294,27 @@ function authorize(req, res) {
   return auth
 }
 
+/**
+ * What the people running the room need to steer the shared browser through
+ * Hyperbeam's own permission system: the session's admin token. It goes to the
+ * owner and moderators only, and is asked for again on every attach, so a
+ * refreshed host gets it back (the room knows them by their browser, not by
+ * their socket). It is never part of the public session, the welcome message
+ * or any broadcast.
+ */
+app.get("/api/rooms/:code/session/control", limits.lookup, (req, res) => {
+  const auth = authorize(req, res)
+  if (!auth) return
+  const { room, role } = auth
+  if (!room.session) return res.status(404).json({ error: "No hay ninguna sesión activa" })
+  res.set("Cache-Control", "no-store").json({
+    adminToken: room.session.admin_token ?? null,
+    controlLocked: Boolean(room.session.control_locked),
+    // The owner outranks moderators when two people reach for the wheel.
+    priority: role === "owner" ? 2 : 1,
+  })
+})
+
 /** The room's shared browser. */
 app.get("/api/rooms/:code/session", limits.lookup, (req, res) => {
   const room = hub.getRoom(req.params.code)
@@ -362,7 +398,7 @@ app.delete("/api/rooms/:code/session", limits.lookup, async (req, res, next) => 
 async function terminate(room, reason = "closed") {
   const session = room.session
   if (!session || !hyperbeam) return
-  room.clearSession()
+  room.clearSession(reason)
   // Recorded before the call that can fail: the minutes were used either way.
   usage.record({
     customer: room.customer,
@@ -480,6 +516,7 @@ const hub = createRoomHub(server, {
   ownerGraceMs: Number(process.env.ROOM_OWNER_GRACE_MS) || undefined,
   emptyTtlMs: Number(process.env.ROOM_EMPTY_TTL_MS) || undefined,
   idleSessionMs: Number(process.env.ROOM_IDLE_SESSION_MS) || undefined,
+  maxIdleSessionMs: MAX_IDLE_SESSION_MS,
   maxRooms: MAX_ROOMS,
   maxViewersPerRoom: process.env.MAX_VIEWERS_PER_ROOM === undefined ? 50 : Number(process.env.MAX_VIEWERS_PER_ROOM) || 0,
   maxSocketsPerIp: Number(process.env.MAX_SOCKETS_PER_IP) || 30,
