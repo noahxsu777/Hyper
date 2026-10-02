@@ -9,20 +9,36 @@ export const setRoomToken = (token) => {
   roomToken = token
 }
 
-async function request(path, options = {}) {
+/**
+ * The customer's code for opening a shared browser. Only that one request
+ * carries it: nothing else on the server has any use for it.
+ */
+let accessCode = ""
+export const setAccessCode = (code) => {
+  accessCode = String(code ?? "").trim()
+}
+
+async function request(path, { headers, ...options } = {}) {
   const res = await fetch(path, {
+    ...options,
     headers: {
       "Content-Type": "application/json",
       ...(roomToken ? { "x-room-token": roomToken } : {}),
+      ...headers,
     },
-    ...options,
     body: options.body ? JSON.stringify(options.body) : undefined,
   })
   const text = await res.text()
-  const data = text ? JSON.parse(text) : null
+  let data = null
+  try {
+    data = text ? JSON.parse(text) : null
+  } catch {
+    /* a proxy's HTML error page: fall through to the status line below */
+  }
   if (!res.ok) {
-    const error = new Error(data?.error || `${res.status} ${res.statusText}`)
+    const error = new Error(data?.error || (res.status === 429 ? "Demasiadas peticiones. Espera un momento." : `${res.status} ${res.statusText}`))
     error.status = res.status
+    error.code = data?.code ?? null
     error.details = data?.details ?? null
     throw error
   }
@@ -58,7 +74,11 @@ export const api = {
 
   /** Start this room's shared browser, or join the one already running. */
   startSession: (code, options = {}) =>
-    request(`/api/rooms/${encodeURIComponent(code)}/session`, { method: "POST", body: options }),
+    request(`/api/rooms/${encodeURIComponent(code)}/session`, {
+      method: "POST",
+      body: options,
+      headers: accessCode ? { "x-access-code": accessCode } : {},
+    }),
 
   /** The room's running session, or null when there is none. */
   async getSession(code) {

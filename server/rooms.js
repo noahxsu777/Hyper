@@ -22,11 +22,16 @@ import { WebSocketServer } from "ws"
 
 import { isGiphyUrl } from "./giphy.js"
 import { GAMES } from "./games.js"
+import { clientIp, takeToken } from "./security.js"
 
 const HISTORY_LIMIT = 120
 const NAME_LIMIT = 24
 const TEXT_LIMIT = 800
 const CODE_LENGTH = 6
+/** Anything a person types or sends: a few at once, then about one a second. */
+const CHAT_RATE = { burst: 5, perSecond: 1 }
+/** Every message of any kind; generous, it only stops machine-speed floods. */
+const SOCKET_RATE = { burst: 60, perSecond: 30 }
 /** No O/0 or I/1: these codes get read aloud and typed on phones. */
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
@@ -139,8 +144,9 @@ function twitchChannel(value) {
  * One party.
  */
 class Room {
-  constructor(code, { ownerGraceMs, emptyTtlMs, idleSessionMs, onEmpty, onIdleSession }) {
+  constructor(code, { ownerGraceMs, emptyTtlMs, idleSessionMs, maxViewers, onEmpty, onIdleSession }) {
     this.code = code
+    this.maxViewers = maxViewers
     this.createdAt = Date.now()
     this.ownerGraceMs = ownerGraceMs
     this.emptyTtlMs = emptyTtlMs
@@ -162,6 +168,9 @@ class Room {
     this.banned = new Set()
     /** A locked room lets nobody new in; the people already inside stay. */
     this.locked = false
+
+    /** Which customer's access code paid for this room's browser, once one did. */
+    this.customer = null
 
     /** The shared Hyperbeam computer, owned by this room alone. */
     this.session = null
@@ -307,6 +316,10 @@ class Room {
       return { ok: false, reason: "La sala está cerrada." }
     }
 
+    if (!returning && !isCreator && this.maxViewers && this.viewers.size >= this.maxViewers) {
+      return { ok: false, reason: "La sala está llena." }
+    }
+
     let viewer
     if (returning) {
       const stale = returning.socket
@@ -320,6 +333,7 @@ class Room {
         name,
         joinedAt: Date.now(),
         token: secret(),
+        chatBucket: {},
         socket,
       }
     }
@@ -766,6 +780,16 @@ class Room {
     const viewer = this.viewers.get(socket)
     if (!viewer) return
 
+    if ((payload.type === "chat" || payload.type === "gif" || payload.type === "sticker") && !takeToken(viewer.chatBucket, CHAT_RATE)) {
+      // Say so once in a while instead of swallowing messages without a word.
+      const now = Date.now()
+      if (!viewer.slowNoticeAt || now - viewer.slowNoticeAt > 5000) {
+        viewer.slowNoticeAt = now
+        this.deny(socket, "Más despacio: estás enviando mensajes demasiado rápido.")
+      }
+      return
+    }
+
     switch (payload.type) {
       case "chat": {
         const text = clean(payload.text, TEXT_LIMIT)
@@ -883,9 +907,26 @@ class Room {
  */
 export function createRoomHub(
   server,
-  { path = "/ws", ownerGraceMs, emptyTtlMs, idleSessionMs, maxRooms = 25, onRoomClosed, onIdleSession } = {},
+  {
+    path = "/ws",
+    ownerGraceMs,
+    emptyTtlMs,
+    idleSessionMs,
+    maxRooms = 25,
+    maxViewersPerRoom = 50,
+    maxSocketsPerIp = 30,
+    maxMessageBytes = 16 * 1024,
+    trustProxy = false,
+    onRoomClosed,
+    onIdleSession,
+  } = {},
 ) {
-  const wss = new WebSocketServer({ server, path })
+  // A chat line, a GIF choice or a game move is a few hundred bytes. Refusing
+  // anything bigger at the socket keeps one client from making the server
+  // buffer and parse megabytes on every message.
+  const wss = new WebSocketServer({ server, path, maxPayload: maxMessageBytes })
+  /** @type {Map<string, number>} */
+  const socketsByIp = new Map()
   /** @type {Map<string, Room>} */
   const rooms = new Map()
 
@@ -943,6 +984,7 @@ export function createRoomHub(
       ownerGraceMs: grace,
       emptyTtlMs: ttl,
       idleSessionMs: idleSession,
+      maxViewers: maxViewersPerRoom,
       onEmpty: closeRoom,
       onIdleSession: (idle) => onIdleSession?.(idle),
     })
@@ -968,22 +1010,39 @@ export function createRoomHub(
     return null
   }
 
-  wss.on("connection", (socket) => {
+  wss.on("connection", (socket, req) => {
+    const ip = clientIp(req, { trustProxy })
+    const open = (socketsByIp.get(ip) ?? 0) + 1
+    if (open > maxSocketsPerIp) {
+      socket.close(1013, "Demasiadas conexiones")
+      return
+    }
+    socketsByIp.set(ip, open)
+    socket.on("close", () => {
+      const left = (socketsByIp.get(ip) ?? 1) - 1
+      if (left <= 0) socketsByIp.delete(ip)
+      else socketsByIp.set(ip, left)
+    })
+
     socket.isAlive = true
     socket.on("pong", () => {
       socket.isAlive = true
     })
+    const bucket = {}
 
     /** @type {Room|null} */
     let room = null
 
     socket.on("message", (raw) => {
+      if (!takeToken(bucket, SOCKET_RATE)) return
+
       let payload
       try {
         payload = JSON.parse(String(raw))
       } catch {
         return
       }
+      if (!payload || typeof payload !== "object") return
 
       // A browser extension syncing someone's Netflix: a remote, not a person.
       if (payload.type === "companion") {
@@ -1075,6 +1134,7 @@ export function createRoomHub(
       moderators: [...room.moderators],
       banned: [...room.banned],
       locked: room.locked,
+      customer: room.customer,
       session: room.session,
       emptySince: room.emptySince ?? Date.now(),
     }))
@@ -1094,6 +1154,7 @@ export function createRoomHub(
       room.moderators = new Set(entry.moderators ?? [])
       room.banned = new Set(entry.banned ?? [])
       room.locked = Boolean(entry.locked)
+      room.customer = entry.customer ?? null
       room.session = entry.session ?? null
       room.emptySince = Number(entry.emptySince) || Date.now()
 

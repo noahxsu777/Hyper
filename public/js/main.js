@@ -9,7 +9,7 @@
 
 import { $, clamp, fill, h } from "./core/dom.js"
 import { icon } from "./core/icons.js"
-import { api, normalizeCode, prettyHost, setRoomToken, toUrl } from "./core/api.js"
+import { api, normalizeCode, prettyHost, setAccessCode, setRoomToken, toUrl } from "./core/api.js"
 import { connectParty } from "./core/party.js"
 import { colourFor, initialsFor, set, state } from "./core/store.js"
 import { initApps, openAppsGallery, renderActivity, setAppVolume, showCue } from "./apps.js"
@@ -159,6 +159,21 @@ function sheet(build, { dismissable = true } = {}) {
 }
 
 /* --------------------------------------------------------------------------
+   Brand — name, logo and links come from the server (BRAND_* variables)
+   -------------------------------------------------------------------------- */
+
+const brand = () => room.config?.brand ?? { name: "Watch Party" }
+
+/** The app's mark: the customer's logo when they set one, the play glyph otherwise. */
+function brandMark(className, size) {
+  const logo = brand().logoUrl
+  if (logo) {
+    return h(`div.${className}.${className}--logo`, null, h("img", { src: logo, alt: "", draggable: "false" }))
+  }
+  return h(`div.${className}`, { html: icon("play", { size }) })
+}
+
+/* --------------------------------------------------------------------------
    Top bar
    -------------------------------------------------------------------------- */
 
@@ -186,7 +201,7 @@ function renderTopbar() {
 
   fill(
     els.topbar,
-    h("div.topbar__mark", { html: icon("play", { size: 17 }) }),
+    brandMark("topbar__mark", 17),
     h(
       "div.topbar__titles",
       null,
@@ -201,7 +216,8 @@ function renderTopbar() {
         "div.topbar__sub",
         null,
         h("span.dot", { dataset: { live } }),
-        h("span", { text: `${statusText} · ${count} ${count === 1 ? "persona" : "personas"}` }),
+        h("span.topbar__status", { text: statusText }),
+        h("span.topbar__count", { text: `· ${count} ${count === 1 ? "persona" : "personas"}` }),
         h("span.tag", {
           dataset: { tone: isOwner() ? "ok" : room.role === "moderator" ? "accent" : "" },
           text: ROLE_LABEL[room.role],
@@ -315,7 +331,7 @@ function showIdle(note) {
 
   showOverlay([
     h("h1.overlay__title", { text: "¿Qué vemos hoy?" }),
-    h("p.overlay__note", {
+    h("p.overlay__note.overlay__lede", {
       text:
         note ??
         "Abre el navegador compartido: todos veréis exactamente la misma pantalla, al mismo tiempo.",
@@ -342,8 +358,7 @@ function showIdle(note) {
       : null,
     configured && canModerate() ? servicesGrid() : null,
     configured
-      ? h("p.overlay__note", {
-          style: { fontSize: "12.5px" },
+      ? h("p.overlay__note.overlay__fine", {
           text: "Netflix, Prime Video y Disney+ usan DRM y puede que no reproduzcan en un navegador virtual. YouTube, Twitch, Vimeo y Archive.org funcionan.",
         })
       : null,
@@ -1159,8 +1174,74 @@ async function start(startUrl) {
     console.error("[party] no se pudo abrir el navegador", error)
     room.starting = false
     renderTopbar()
+
+    // The operator licenses who may open a browser: ask for the customer's
+    // code, remember it, and go again. Typing it wrong asks again, not a dead end.
+    if (error.code === "access_required" || error.code === "access_invalid") {
+      if (error.code === "access_invalid") {
+        set({ accessCode: "" })
+        setAccessCode("")
+      }
+      showIdle()
+      askAccessCode(error.code === "access_invalid" ? error.message : "").then((code) => {
+        if (code) start(startUrl)
+      })
+      return
+    }
     showError(error)
   }
+}
+
+/** Ask for the code that unlocks the shared browser. Resolves to it, or null if dismissed. */
+function askAccessCode(problem = "") {
+  return new Promise((resolve) => {
+    let answered = false
+    const finish = (value) => {
+      if (answered) return
+      answered = true
+      resolve(value)
+    }
+    const field = h("input.field", {
+      type: "text",
+      placeholder: "Código de acceso",
+      autocomplete: "off",
+      autocapitalize: "off",
+      spellcheck: "false",
+      "aria-label": "Código de acceso",
+    })
+    sheet((close) => {
+      const submit = () => {
+        const code = field.value.trim()
+        if (!code) return field.focus()
+        set({ accessCode: code })
+        setAccessCode(code)
+        finish(code)
+        close()
+      }
+      field.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") submit()
+      })
+      setTimeout(() => field.focus({ preventScroll: true }), 120)
+      return [
+        h("div.sheet__title", { text: "Código de acceso" }),
+        h("div.sheet__text", {
+          text: "Abrir el navegador compartido necesita el código de tu cuenta. Entrar a la sala, el chat y los juegos no lo piden.",
+        }),
+        problem ? h("p.lobby__error", { text: problem }) : null,
+        field,
+        h("button.btn", { type: "button", text: "Continuar", onClick: submit }),
+        h("button.btn", {
+          type: "button",
+          dataset: { tone: "quiet" },
+          text: "Cancelar",
+          onClick: () => {
+            finish(null)
+            close()
+          },
+        }),
+      ]
+    })
+  })
 }
 
 /** Connect to a session someone else already opened. */
@@ -1422,20 +1503,25 @@ async function openSettings() {
       config?.activeUserAgent && config?.userAgent && config.activeUserAgent !== config.userAgent
     const rows = [
       ["Navegador compartido", session ? "En marcha" : "Detenido"],
-      ["Clave de API", config?.configured ? (config.testKey ? "De prueba" : "Activa") : "Sin configurar"],
+      // Operator diagnostics: the server only sends them outside production.
+      config?.testKey === undefined
+        ? null
+        : ["Clave de API", config.configured ? (config.testKey ? "De prueba" : "Activa") : "Sin configurar"],
       ["Resolución", config?.width ? `${config.width}×${config.height}` : "—"],
-      [
-        "User agent",
-        agent
-          ? fellBack
-            ? `${agent} (el tuyo fue rechazado)`
-            : agent
-          : "Por defecto (Chrome de escritorio)",
-      ],
+      config?.userAgent === undefined
+        ? null
+        : [
+            "User agent",
+            agent
+              ? fellBack
+                ? `${agent} (el tuyo fue rechazado)`
+                : agent
+              : "Por defecto (Chrome de escritorio)",
+          ],
       ["Personas en la sala", String(room.viewers.length)],
       ["Tu papel", ROLE_LABEL[room.role]],
       ["Código", room.code ?? "—"],
-    ]
+    ].filter(Boolean)
 
     return [
       h("div.sheet__title", { text: "Ajustes de la sala" }),
@@ -1859,6 +1945,22 @@ function renderOpenRooms(container, rooms, onPick) {
   )
 }
 
+/** Support and legal links, shown only for the ones the operator configured. */
+function legalLinks() {
+  const { supportUrl, termsUrl, privacyUrl } = brand()
+  const links = [
+    [supportUrl, "Soporte"],
+    [termsUrl, "Términos"],
+    [privacyUrl, "Privacidad"],
+  ].filter(([url]) => url)
+  if (!links.length) return null
+  return h(
+    "footer.landing__legal",
+    null,
+    ...links.map(([url, label]) => h("a", { href: url, target: "_blank", rel: "noopener noreferrer", text: label })),
+  )
+}
+
 /** Everything before a room exists: open one, pick one, or type a code. */
 function showLobby({ notice, code = "" } = {}) {
   els.app.hidden = true
@@ -1985,11 +2087,9 @@ function showLobby({ notice, code = "" } = {}) {
       h(
         "header.landing__hero",
         null,
-        h("div.lobby__mark", { html: icon("play", { size: 26 }) }),
-        h("h1.landing__title", { text: "Watch Party" }),
-        h("p.landing__tagline", {
-          text: "Un solo navegador para toda la sala. Pon una película y la veis a la vez, en la misma pantalla y al mismo segundo.",
-        }),
+        brandMark("lobby__mark", 26),
+        h("h1.landing__title", { text: brand().name }),
+        h("p.landing__tagline", { text: brand().tagline ?? "" }),
       ),
       h(
         "div.landing__cols",
@@ -2023,6 +2123,7 @@ function showLobby({ notice, code = "" } = {}) {
           roomsList,
         ),
       ),
+      legalLinks(),
     ),
   )
 
@@ -2048,6 +2149,7 @@ function showLobby({ notice, code = "" } = {}) {
 function enterRoom(code) {
   room.code = normalizeCode(code)
   history.replaceState(null, "", `/${room.code}`)
+  document.title = `${brand().name} · ${room.code}`
 
   stopRoomsPoll()
   els.lobby.hidden = true
@@ -2072,6 +2174,7 @@ function enterRoom(code) {
 }
 
 async function boot() {
+  setAccessCode(state.accessCode)
   room.config = await api.config().catch((error) => ({
     configured: false,
     error: `No se pudo hablar con el servidor: ${error.message}`,

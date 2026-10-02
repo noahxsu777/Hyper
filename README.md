@@ -44,6 +44,10 @@ navegador compartido. La app arranca aunque no haya clave: te dirá qué falta.
 | `MAX_ROOMS` | `25` | Salas abiertas a la vez. Cada una puede gastar minutos de Hyperbeam. |
 | `PORT` | `3000` | Puerto del servidor. |
 
+Marca, acceso, límites y medición de uso (`BRAND_*`, `ACCESS_CODES`,
+`MAX_SESSIONS`, `ADMIN_TOKEN`…) están explicados en
+[Producción y venta a clientes](#producción-y-venta-a-clientes).
+
 ---
 
 ## Desplegar en Fly.io
@@ -79,10 +83,147 @@ watch party, una máquina sobra.
   es PID 1 y recibe el SIGINT que Fly manda al parar la máquina, que es lo que
   dispara el apagado de la sesión de Hyperbeam. Con `npm` en medio la señal no
   llega y el navegador virtual seguiría facturando.
-- Health check contra `/api/config`.
+- Health check contra `/healthz` (barato: no toca Hyperbeam).
 - **La máquina no se para sola** (`auto_stop_machines = 'off'`,
   `min_machines_running = 1`). Ver más abajo: es lo que hacía que una sala
   "dejara de existir" a media película.
+
+---
+
+## Producción y venta a clientes
+
+Lo que hace falta para ofrecer esto a terceros sin que sea un prototipo: marca
+propia, control de quién gasta minutos, un techo para la factura, medición por
+cliente y un servidor que no se deja abusar.
+
+### Checklist antes de abrirlo al público
+
+1. `NODE_ENV=production` (ya está en el `Dockerfile` y en `fly.toml`). En
+   producción el público ve mensajes amables; los detalles técnicos y los
+   diagnósticos del operador (clave de prueba, user agent…) van solo al log.
+2. Una clave **`sk_live_`** de Hyperbeam. Con una `sk_test_` el arranque lo
+   avisa: los minutos son limitados.
+3. `ACCESS_CODES` con un código por cliente (ver abajo). Sin él, **cualquiera**
+   que entre a una sala puede abrir un navegador y gastar tus minutos.
+4. `MAX_SESSIONS` pensado con tu plan de Hyperbeam: es el techo de la factura.
+5. `ADMIN_TOKEN` para consultar el uso (16 caracteres mínimo).
+6. Un volumen persistente para `ROOM_STATE_FILE` y `USAGE_FILE`. El disco de una
+   máquina de Fly se borra en cada despliegue: sin volumen pierdes el registro
+   de uso. Crea el volumen con `fly volumes create data --size 1 --region ams`,
+   añade a `fly.toml`
+   ```toml
+   [mounts]
+     source = 'data'
+     destination = '/data'
+   ```
+   y define `ROOM_STATE_FILE=/data/rooms-state.json` y
+   `USAGE_FILE=/data/usage.jsonl`.
+7. `fly scale count 1` (ver arriba).
+
+### Marca blanca
+
+Todo sale de variables de entorno; no hay que tocar código.
+
+| Variable | Por defecto | Efecto |
+| --- | --- | --- |
+| `BRAND_NAME` | `Watch Party` | Nombre en la portada, la pestaña, el icono de inicio y la vista previa al compartir el enlace. |
+| `BRAND_SHORT_NAME` | `BRAND_NAME` (14 car.) | Nombre bajo el icono en la pantalla de inicio del móvil. |
+| `BRAND_TAGLINE` | (frase por defecto) | Subtítulo de la portada y descripción del enlace. |
+| `BRAND_ACCENT` | `#7c5cff` | Color de marca `#rrggbb`: botones, degradados, brillos **y los iconos de la app**, que el servidor dibuja con ese color. |
+| `BRAND_LOGO_URL` | — | Logo (https) que sustituye al símbolo ▶ en la portada y la barra superior. |
+| `BRAND_SUPPORT_URL` / `BRAND_TERMS_URL` / `BRAND_PRIVACY_URL` | — | Enlaces «Soporte», «Términos» y «Privacidad» al pie de la portada. Solo aparecen los que definas, y solo se aceptan URLs `http(s)`. Los textos legales los pones tú: la app no inventa ninguno. |
+| `BRAND_ASSETS_DIR` | — | Carpeta con tus propios `icon-32.png`, `icon-180.png`, `icon-192.png` e `icon-512.png`. Los que existan sustituyen a los dibujados. |
+| `FRAME_ANCESTORS` | `'none'` | Por defecto la app no se puede incrustar en otra web. Para ponerla dentro de la de un cliente: `https://cliente.com`. |
+
+**Instalable en el iPhone.** Abre la web en Safari → Compartir → *Añadir a
+pantalla de inicio*. Se abre a pantalla completa, sin barra de Safari, con su
+icono y su nombre (`manifest.webmanifest`, `apple-touch-icon` y los metadatos de
+app web ya están en la página). Los iconos son opacos y sin esquinas
+redondeadas a propósito: iOS les pone las suyas.
+
+### Quién puede abrir un navegador (`ACCESS_CODES`)
+
+Entrar a una sala, chatear y jugar no cuesta nada. Lo único que cuesta dinero es
+la máquina virtual, así que es lo único que se controla:
+
+```bash
+ACCESS_CODES="Acme Corp=acme-7Hk2-93xQ,Globex=globex-Zr4t-81bN"
+```
+
+- Formato `Cliente=código`, separados por comas. Mínimo 8 caracteres por código
+  (el arranque avisa de los cortos).
+- Quien pulse «Abrir el navegador compartido» sin código ve una hoja que lo pide;
+  lo recuerda en ese navegador y, si se equivoca, vuelve a preguntar.
+- La **sala queda licenciada** por el primer código válido: sus siguientes
+  arranques no lo piden y todos los minutos se atribuyen a ese cliente.
+- Unirse a un navegador que ya está abierto nunca pide código.
+- Sin `ACCESS_CODES` todo queda abierto (desarrollo, o una instalación de un solo
+  cliente).
+
+### Techo de gasto y límites
+
+| Variable | Por defecto | Qué limita |
+| --- | --- | --- |
+| `MAX_SESSIONS` | `10` | Máquinas virtuales vivas a la vez, de quien sea. `0` lo quita. Al llegar, el que pide una nueva ve «no hay navegadores libres» y no se gasta nada. |
+| `MAX_VIEWERS_PER_ROOM` | `50` | Personas por sala (el creador siempre entra). |
+| `MAX_SOCKETS_PER_IP` | `30` | Conexiones simultáneas por dirección. |
+| `RATE_LIMIT_MULTIPLIER` | `1` | Multiplica todos los límites por IP. Súbelo (`3`) si un cliente tiene una oficina entera detrás de una sola IP. |
+
+Límites fijos por IP: 12 salas nuevas / 10 min, 20 aperturas de navegador /
+10 min (los códigos mal escritos cuentan, lo que frena a quien pruebe códigos),
+60 búsquedas de GIF/YouTube / min. En el chat, ráfagas de 5 mensajes y luego
+uno por segundo; los mensajes del socket no pueden pasar de 16 KB.
+
+Detrás de Fly se usa la IP real del cliente. Fuera de un proxy conocido no se
+fía de `X-Forwarded-For` (lo escribe quien quiera); `TRUST_PROXY=1` lo activa a
+mano.
+
+### Medición de uso y facturación
+
+Cada vez que se apaga una máquina (por el botón, por inactividad, al cerrar la
+sala o al parar el servidor) se añade una línea a `USAGE_FILE`
+(`usage.jsonl`, una por sesión: cliente, sala, inicio, fin, minutos y motivo).
+Con `ADMIN_TOKEN` definido:
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "https://tu-app.fly.dev/api/admin/usage?since=2026-10-01"
+```
+
+devuelve minutos y sesiones por cliente desde esa fecha, más lo que está
+corriendo ahora (`live`) y cuánto queda hasta los topes. **No incluye cobro**: la
+app mide, tú facturas.
+
+Dos matices honestos: una sesión que sigue viva (o que se pierde por una caída
+sin apagado limpio) aparece en `live`, no en los totales hasta que termine; y
+los minutos son los del servidor (de la creación al borrado de la máquina), que
+pueden diferir unos segundos de lo que te cobre Hyperbeam.
+
+### Seguridad que ya lleva
+
+- Cabeceras en todo: `X-Content-Type-Options`, `Referrer-Policy`,
+  `frame-ancestors`/`X-Frame-Options` (no se puede enmarcar), y HSTS tras HTTPS.
+  La política CSP es solo el subconjunto seguro: una con `script-src`/`connect-src`
+  tendría que listar cada host de Hyperbeam, YouTube, Twitch y GIPHY, y un error
+  ahí rompe la pantalla compartida en silencio, así que es una decisión de cada
+  despliegue.
+- Peticiones de 16 KB como mucho; comparación de códigos y token en tiempo
+  constante; el panel de uso no existe (404) sin `ADMIN_TOKEN`.
+- Errores de Hyperbeam: al público una frase («se ha agotado el cupo…»); al log,
+  el detalle y una línea `[ALERTA]` cuando parece cupo agotado o clave rechazada.
+- Un cierre limpio (SIGTERM/SIGINT, o una excepción inesperada) apaga todas las
+  máquinas antes de salir.
+
+### Pruebas
+
+```bash
+npm test
+```
+
+Levanta el servidor de verdad con un Hyperbeam simulado que cuenta las máquinas
+vivas (esa cuenta es la factura) y comprueba: roles y relevo del anfitrión,
+códigos de acceso, tope de máquinas, que tres clics a la vez abren una sola,
+medición de uso, marca y manifest, límites, cabeceras y apagado.
 
 ---
 
@@ -373,7 +514,11 @@ navegador  ◀────{ embedUrl }─────  servidor  ◀──{ sess
 
 ```
 server/
-  index.js       Express: estáticos, /api/config, /api/rooms/:code/session
+  index.js       Express: estáticos, /api/config, /api/rooms/:code/session, /api/admin/usage
+  security.js    Cabeceras, límites por IP y antiflood de sockets
+  brand.js       Marca blanca: HTML, manifest e iconos PNG dibujados con el color
+  access.js      Códigos de acceso por cliente
+  usage.js       Registro de minutos de máquina por cliente
   hyperbeam.js   Cliente REST de Hyperbeam
   giphy.js       Búsqueda de GIFs, para que la clave no salga del servidor
   youtube.js     Búsqueda de vídeos vía la API de la web de YouTube (sin clave)
@@ -385,6 +530,7 @@ public/
     core/        dom · icons (SVG) · api · party (socket) · store
     apps.js      Catálogo y vistas: YouTube sincronizado, Twitch, Netflix, tableros
     main.js      La sala entera
+test/            Pruebas (npm test): salas, servidor, marca, acceso y apagado
 extension/       Extensión de navegador: vincula la pestaña de Netflix a la sala
 ```
 

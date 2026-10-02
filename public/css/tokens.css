@@ -6,9 +6,11 @@
   --font-rounded: -apple-system, "SF Pro Rounded", "SF Pro Display", var(--font-ui);
   --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
 
-  /* Brand */
+  /* Brand — the server overrides these from BRAND_ACCENT (see server/brand.js) */
   --accent: #7c5cff;
   --accent-soft: #a78bfa;
+  --accent-deep: #6d3cf5;
+  --accent-rgb: 124, 92, 255;
 
   /* iOS system colours, dark appearance */
   --tint: #0a84ff;

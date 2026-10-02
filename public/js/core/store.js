@@ -10,6 +10,8 @@ const DEFAULTS = {
    */
   clientId: "",
   name: "",
+  /** The customer's code for opening the shared browser, once they have typed one. */
+  accessCode: "",
   volume: 0.85,
   muted: false,
   theatre: false,

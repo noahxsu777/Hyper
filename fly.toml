@@ -16,6 +16,8 @@ primary_region = 'ams'
 [build]
 
 [env]
+  # Producción: mensajes amables al público y nada de diagnósticos del operador.
+  NODE_ENV = 'production'
   # Fly no define PORT por su cuenta: sin esto el servidor escucharía en el 3000
   # mientras el proxy enruta al 8080, donde no hay nadie escuchando.
   PORT = '8080'
@@ -65,7 +67,7 @@ primary_region = 'ams'
     timeout = '5s'
     grace_period = '10s'
     method = 'GET'
-    path = '/api/config'
+    path = '/healthz'
 
 [[vm]]
   size = 'shared-cpu-1x'
